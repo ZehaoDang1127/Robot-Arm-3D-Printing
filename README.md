@@ -4,19 +4,11 @@ This repository now contains a Python pipeline for turning Cura/Marlin G-code
 into a Franka Panda joint trajectory that can be inspected visually and replayed
 in Isaac Sim.
 
-## Current Status
-
-The original files were a good start, but they did **not** finish the whole
-task by themselves.
+## Files
 
 - `gcode_parser.py` can parse Cura G-code into motion commands.
 - `stage2_pathprep.py` can clean, simplify, densify, and transform paths into a
   Franka base-frame waypoint list.
-- The missing pieces were Franka IK, path-motion optimization, simulator export,
-  and visualization.
-
-Those missing pieces have been added:
-
 - `stage3_franka_ik.py` solves Panda IK with yaw-redundancy optimization.
 - `export_isaac.py` writes CSV/JSON trajectories and an Isaac Sim replay script.
 - `visualize_pipeline.py` writes SVG path and joint-motion visualizations.
@@ -140,14 +132,3 @@ configured residual tolerance. Check these CSV columns:
 
 For physical printing, those errors must be much smaller than your acceptable
 bead width and layer-height tolerance.
-
-## Recommended Next Steps Before Hardware
-
-- Calibrate the nozzle TCP and replace `tool_length_m` in `IKConfig`.
-- Validate the Panda model against Isaac Sim or Pinocchio.
-- Add real collision geometry for the nozzle, bed, printed part, and robot
-  links.
-- Add time parameterization and velocity/acceleration limits.
-- Add extrusion synchronization from `de` and `feed_m_s`.
-- Test one layer in Isaac Sim before running the full model.
-
