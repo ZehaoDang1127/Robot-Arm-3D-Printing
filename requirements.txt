@@ -1,0 +1,4 @@
+numpy>=1.24
+
+# Isaac Sim is not installed with pip. Install it through NVIDIA Omniverse,
+# then run outputs/replay_isaac.py inside Isaac Sim's Python environment.
