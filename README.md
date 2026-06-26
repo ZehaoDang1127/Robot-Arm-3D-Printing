@@ -10,6 +10,8 @@ in Isaac Sim.
 - `stage2_pathprep.py` can clean, simplify, densify, and transform paths into a
   Franka base-frame waypoint list.
 - `stage3_franka_ik.py` solves Panda IK with yaw-redundancy optimization.
+- `franka_panda_parameters.py` stores extracted Franka modified-DH and dynamic
+  parameters from the referenced MATLAB model.
 - `export_isaac.py` writes CSV/JSON trajectories and an Isaac Sim replay script.
 - `visualize_pipeline.py` writes SVG path and joint-motion visualizations.
 - `run_pipeline.py` runs the stages from one command.
@@ -94,12 +96,16 @@ If Isaac cannot find the Franka asset, edit `FRANKA_USD` near the top of
    - Converts printer millimeters to robot-base meters.
 
 3. `stage3_franka_ik.py`
-   - Uses a Panda kinematic model and damped least-squares IK.
+   - Uses the extracted modified-DH Panda model from
+     `franka_panda_parameters.py` and damped least-squares IK.
    - Preserves print order for printability.
    - Optimizes robot motion by trying yaw candidates and choosing the solution
      closest to the previous joint state.
    - Checks joint limits, reach, and simple bed clearance.
    - Records residual position/orientation errors for every point.
+
+`compare_franka_models.py` prints the difference between the previous inline
+Stage-3 kinematic constants and the extracted modified-DH parameter model.
 
 4. `export_isaac.py`
    - Exports simulator-friendly CSV/JSON.

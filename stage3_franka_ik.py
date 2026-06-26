@@ -21,22 +21,11 @@ from pathlib import Path
 
 import numpy as np
 
+from franka_panda_parameters import MODIFIED_DH_LINKS, STANDARD_PANDA_JOINT_LIMITS_RAD
 from stage2_pathprep import PathPrep, Waypoint
 
 
-PANDA_JOINT_LIMITS = np.array(
-    [
-        [-2.8973, 2.8973],
-        [-1.7628, 1.7628],
-        [-2.8973, 2.8973],
-        [-3.0718, -0.0698],
-        [-2.8973, 2.8973],
-        [-0.0175, 3.7525],
-        [-2.8973, 2.8973],
-    ],
-    dtype=float,
-)
-
+PANDA_JOINT_LIMITS = STANDARD_PANDA_JOINT_LIMITS_RAD
 PANDA_HOME = np.array([0.0, -0.45, 0.0, -2.35, 0.0, 2.05, 0.75], dtype=float)
 
 
@@ -188,50 +177,87 @@ class RobotTrajectory:
         path.write_text(json.dumps(payload, indent=2))
 
 
-def _dh(a: float, alpha: float, d: float, theta: float) -> np.ndarray:
+def _modified_dh(theta: float, d: float, a: float, alpha: float) -> np.ndarray:
+    """Peter Corke modified-DH transform: Rx(alpha) Tx(a) Rz(theta) Tz(d)."""
     ca, sa = math.cos(alpha), math.sin(alpha)
     ct, st = math.cos(theta), math.sin(theta)
     return np.array(
         [
-            [ct, -st * ca, st * sa, a * ct],
-            [st, ct * ca, -ct * sa, a * st],
-            [0.0, sa, ca, d],
+            [ct, -st, 0.0, a],
+            [st * ca, ct * ca, -sa, -d * sa],
+            [st * sa, ct * sa, ca, d * ca],
             [0.0, 0.0, 0.0, 1.0],
         ],
         dtype=float,
     )
 
 
+def _modified_dh_joint_frame(a: float, alpha: float) -> np.ndarray:
+    """Transform from previous link frame to the current modified-DH joint axis."""
+    ca, sa = math.cos(alpha), math.sin(alpha)
+    return np.array(
+        [
+            [1.0, 0.0, 0.0, a],
+            [0.0, ca, -sa, 0.0],
+            [0.0, sa, ca, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+
+def _tool_transform(tool_length_m: float) -> np.ndarray:
+    """Simple nozzle TCP offset along the final tool z-axis."""
+    T = np.eye(4)
+    T[2, 3] = tool_length_m
+    return T
+
+
 def panda_fk(q: np.ndarray, tool_length_m: float = 0.115) -> tuple[np.ndarray, list[np.ndarray]]:
-    """Return tool-center pose and all intermediate link transforms."""
+    """Return tool-center pose and all intermediate link transforms.
+
+    The arm geometry is loaded from `franka_panda_parameters.MODIFIED_DH_LINKS`,
+    extracted from the referenced MATLAB `panda7dof_robot_gen.m` file. The list
+    of transforms contains the base frame, each link frame, and the final TCP.
+    """
     q = np.asarray(q, dtype=float)
-    # Standard DH approximation for Franka Emika Panda, ending at flange.
-    dh = [
-        (0.0, -math.pi / 2, 0.333, q[0]),
-        (0.0, math.pi / 2, 0.0, q[1]),
-        (0.0, math.pi / 2, 0.316, q[2]),
-        (0.0825, math.pi / 2, 0.0, q[3]),
-        (-0.0825, -math.pi / 2, 0.384, q[4]),
-        (0.0, math.pi / 2, 0.0, q[5]),
-        (0.088, math.pi / 2, 0.107, q[6]),
-    ]
+    if q.shape != (7,):
+        raise ValueError(f"expected 7 Panda joints, got shape {q.shape}")
     T = np.eye(4)
     Ts = [T.copy()]
-    for a, alpha, d, theta in dh:
-        T = T @ _dh(a, alpha, d, theta)
+    for qi, link in zip(q, MODIFIED_DH_LINKS):
+        theta = float(qi + link.theta_offset_rad)
+        T = T @ _modified_dh(theta, link.d_m, link.a_m, link.alpha_rad)
         Ts.append(T.copy())
-    T = T @ _dh(0.0, 0.0, tool_length_m, -math.pi / 4)
+    T = T @ _tool_transform(tool_length_m)
     Ts.append(T.copy())
     return T, Ts
 
 
+def panda_joint_frames(q: np.ndarray) -> list[np.ndarray]:
+    """Return base-frame transforms of the seven modified-DH joint axes."""
+    q = np.asarray(q, dtype=float)
+    if q.shape != (7,):
+        raise ValueError(f"expected 7 Panda joints, got shape {q.shape}")
+
+    T = np.eye(4)
+    frames: list[np.ndarray] = []
+    for qi, link in zip(q, MODIFIED_DH_LINKS):
+        joint_T = T @ _modified_dh_joint_frame(link.a_m, link.alpha_rad)
+        frames.append(joint_T.copy())
+        theta = float(qi + link.theta_offset_rad)
+        T = T @ _modified_dh(theta, link.d_m, link.a_m, link.alpha_rad)
+    return frames
+
+
 def geometric_jacobian(q: np.ndarray, tool_length_m: float) -> np.ndarray:
-    _, Ts = panda_fk(q, tool_length_m)
-    pe = Ts[-1][:3, 3]
+    T_tool, _ = panda_fk(q, tool_length_m)
+    pe = T_tool[:3, 3]
+    joint_frames = panda_joint_frames(q)
     J = np.zeros((6, 7), dtype=float)
-    for i in range(7):
-        zi = Ts[i][:3, 2]
-        pi = Ts[i][:3, 3]
+    for i, joint_T in enumerate(joint_frames):
+        zi = joint_T[:3, 2]
+        pi = joint_T[:3, 3]
         J[:3, i] = np.cross(zi, pe - pi)
         J[3:, i] = zi
     return J
