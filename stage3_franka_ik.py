@@ -32,6 +32,8 @@ PANDA_HOME = np.array([0.0, -0.45, 0.0, -2.35, 0.0, 2.05, 0.75], dtype=float)
 @dataclass
 class IKConfig:
     tool_length_m: float = 0.115
+    tool_tcp_xyz_m: tuple[float, float, float] | None = None
+    tool_tcp_rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0)
     # The bundled NumPy-only model is intended for planning/simulation export.
     # Keep these tolerances visible in output files; tighten them after
     # calibrating the actual nozzle TCP and Panda model in Isaac/Pinocchio.
@@ -206,14 +208,35 @@ def _modified_dh_joint_frame(a: float, alpha: float) -> np.ndarray:
     )
 
 
-def _tool_transform(tool_length_m: float) -> np.ndarray:
-    """Simple nozzle TCP offset along the final tool z-axis."""
+def _rpy_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cr, -sr], [0.0, sr, cr]], dtype=float)
+    Ry = np.array([[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]], dtype=float)
+    Rz = np.array([[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]], dtype=float)
+    return Rz @ Ry @ Rx
+
+
+def _tool_transform(
+    tool_length_m: float,
+    tool_tcp_xyz_m: tuple[float, float, float] | None = None,
+    tool_tcp_rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> np.ndarray:
+    """Nozzle TCP transform from final Panda link frame."""
+    xyz = tool_tcp_xyz_m if tool_tcp_xyz_m is not None else (0.0, 0.0, tool_length_m)
     T = np.eye(4)
-    T[2, 3] = tool_length_m
+    T[:3, :3] = _rpy_matrix(*tool_tcp_rpy_rad)
+    T[:3, 3] = np.asarray(xyz, dtype=float)
     return T
 
 
-def panda_fk(q: np.ndarray, tool_length_m: float = 0.115) -> tuple[np.ndarray, list[np.ndarray]]:
+def panda_fk(
+    q: np.ndarray,
+    tool_length_m: float = 0.115,
+    tool_tcp_xyz_m: tuple[float, float, float] | None = None,
+    tool_tcp_rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> tuple[np.ndarray, list[np.ndarray]]:
     """Return tool-center pose and all intermediate link transforms.
 
     The arm geometry is loaded from `franka_panda_parameters.MODIFIED_DH_LINKS`,
@@ -229,7 +252,7 @@ def panda_fk(q: np.ndarray, tool_length_m: float = 0.115) -> tuple[np.ndarray, l
         theta = float(qi + link.theta_offset_rad)
         T = T @ _modified_dh(theta, link.d_m, link.a_m, link.alpha_rad)
         Ts.append(T.copy())
-    T = T @ _tool_transform(tool_length_m)
+    T = T @ _tool_transform(tool_length_m, tool_tcp_xyz_m, tool_tcp_rpy_rad)
     Ts.append(T.copy())
     return T, Ts
 
@@ -250,8 +273,13 @@ def panda_joint_frames(q: np.ndarray) -> list[np.ndarray]:
     return frames
 
 
-def geometric_jacobian(q: np.ndarray, tool_length_m: float) -> np.ndarray:
-    T_tool, _ = panda_fk(q, tool_length_m)
+def geometric_jacobian(
+    q: np.ndarray,
+    tool_length_m: float,
+    tool_tcp_xyz_m: tuple[float, float, float] | None = None,
+    tool_tcp_rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> np.ndarray:
+    T_tool, _ = panda_fk(q, tool_length_m, tool_tcp_xyz_m, tool_tcp_rpy_rad)
     pe = T_tool[:3, 3]
     joint_frames = panda_joint_frames(q)
     J = np.zeros((6, 7), dtype=float)
@@ -302,7 +330,7 @@ def solve_ik(
     best_rot = float("inf")
 
     for _ in range(cfg.max_iters):
-        cur_T, _ = panda_fk(q, cfg.tool_length_m)
+        cur_T, _ = panda_fk(q, cfg.tool_length_m, cfg.tool_tcp_xyz_m, cfg.tool_tcp_rpy_rad)
         ep = target_T[:3, 3] - cur_T[:3, 3]
         er = _rotvec_error(cur_T[:3, :3], target_T[:3, :3])
         pos_err = float(np.linalg.norm(ep))
@@ -314,7 +342,7 @@ def solve_ik(
             return True, q, pos_err, rot_err
 
         e = np.concatenate([ep, cfg.orientation_weight * er])
-        J = W @ geometric_jacobian(q, cfg.tool_length_m)
+        J = W @ geometric_jacobian(q, cfg.tool_length_m, cfg.tool_tcp_xyz_m, cfg.tool_tcp_rpy_rad)
         JJt = J @ J.T + lam2 * np.eye(6)
         dq = J.T @ np.linalg.solve(JJt, e)
 
@@ -351,7 +379,7 @@ def _joint_motion(points: list[TrajectoryPoint]) -> float:
 
 def _collision_warnings(q: np.ndarray, cfg: IKConfig, index: int) -> list[str]:
     warnings = []
-    _, Ts = panda_fk(q, cfg.tool_length_m)
+    _, Ts = panda_fk(q, cfg.tool_length_m, cfg.tool_tcp_xyz_m, cfg.tool_tcp_rpy_rad)
     min_z = min(float(T[2, 3]) for T in Ts[1:])
     if min_z < cfg.bed_z_m + cfg.min_clearance_m:
         warnings.append(

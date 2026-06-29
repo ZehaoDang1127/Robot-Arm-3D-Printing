@@ -12,6 +12,8 @@ in Isaac Sim.
 - `stage3_franka_ik.py` solves Panda IK with yaw-redundancy optimization.
 - `franka_panda_parameters.py` stores extracted Franka modified-DH and dynamic
   parameters from the referenced MATLAB model.
+- `planner_config.json` stores robot home/limits, bed transform, nozzle TCP,
+  path-prep defaults, and IK tolerances.
 - `export_isaac.py` writes CSV/JSON trajectories and an Isaac Sim replay script.
 - `visualize_pipeline.py` writes SVG path and joint-motion visualizations.
 - `run_pipeline.py` runs the stages from one command.
@@ -50,6 +52,12 @@ Run a coarser preview over more waypoints:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --lo 0 --hi 3 --max-seg-len-mm 10 --ik-stride 5 --output-dir outputs_preview
+```
+
+Use a different planner configuration:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode --config planner_config.json --lo 0 --hi 1
 ```
 
 Full-resolution IK over the whole model can be slow. Start with one layer,
@@ -113,6 +121,8 @@ Stage-3 kinematic constants and the extracted modified-DH parameter model.
 
 ## Coordinate Setup
 
+The default bed and nozzle placement live in `planner_config.json`.
+
 The default bed placement is:
 
 - bed center: `(0.45, 0.0)` meters in the Franka base frame
@@ -126,6 +136,25 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode --bed-x-m 0.40 --bed
 
 The `PathPrep.summary()` output reports reach from the robot base. Keep the
 path well inside the Panda workspace before running IK.
+
+## Planner Config
+
+Edit `planner_config.json` when you want persistent calibrated values.
+
+- `robot.home_q_rad`: nominal Panda seed posture.
+- `robot.joint_limits_rad`: joint limits used by IK.
+- `robot.max_reach_m`: reach warning threshold.
+- `bed.center_xyz_m`: print-bed center in Franka base coordinates.
+- `bed.min_clearance_m`: simple bed-clearance warning margin.
+- `nozzle_tcp.flange_to_nozzle_xyz_m`: nozzle TCP translation from final Panda
+  link frame.
+- `nozzle_tcp.flange_to_nozzle_rpy_rad`: nozzle TCP roll, pitch, yaw.
+- `path_preparation.max_seg_len_mm`: waypoint spacing after densification.
+- `path_preparation.simplify_deg`: collinear simplification tolerance.
+- `ik`: numerical IK tolerances and solver settings.
+
+Command-line flags like `--bed-z-m`, `--max-seg-len-mm`, and `--ik-stride`
+override the config for that run only.
 
 ## Reading IK Results
 

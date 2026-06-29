@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 360" width="920" height="360">
+<rect width="100%" height="100%" fill="#fbfbfb" />
+<text x="20" y="26" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#202428">Optimized Franka Joint Motion</text>
+<line x1="30" y1="324" x2="890" y2="324" stroke="#d6d9dd" />
+<polyline points="30.0,324.0 47.9,324.0 65.8,324.0 83.8,324.0 101.7,202.2 119.6,324.0 137.5,324.0 155.4,324.0 173.3,324.0 191.2,324.0 209.2,324.0 227.1,324.0 245.0,324.0 262.9,165.3 280.8,324.0 298.8,324.0 316.7,324.0 334.6,324.0 352.5,324.0 370.4,324.0 388.3,205.4 406.2,324.0 424.2,324.0 442.1,201.9 460.0,60.5 477.9,56.3 495.8,53.6 513.8,50.0 531.7,324.0 549.6,324.0 567.5,324.0 585.4,324.0 603.3,324.0 621.2,218.2 639.2,324.0 657.1,324.0 675.0,324.0 692.9,114.8 710.8,324.0 728.8,324.0 746.7,324.0 764.6,262.4 782.5,324.0 800.4,324.0 818.3,324.0 836.2,266.9 854.2,324.0 872.1,324.0 890.0,264.1" fill="none" stroke="#2ca02c" stroke-width="1.5" stroke-opacity="0.95" stroke-linecap="round" stroke-linejoin="round" />
+<text x="20" y="346" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#555">per-step joint displacement, max 0.0649 rad</text>
+</svg>

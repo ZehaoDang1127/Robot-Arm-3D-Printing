@@ -1,0 +1,42 @@
+{
+  "robot": {
+    "model": "franka_panda",
+    "parameter_source": "franka_panda_parameters.py",
+    "home_q_rad": [0.0, -0.45, 0.0, -2.35, 0.0, 2.05, 0.75],
+    "joint_limits_rad": [
+      [-2.8973, 2.8973],
+      [-1.7628, 1.7628],
+      [-2.8973, 2.8973],
+      [-3.0718, -0.0698],
+      [-2.8973, 2.8973],
+      [-0.0175, 3.7525],
+      [-2.8973, 2.8973]
+    ],
+    "max_reach_m": 0.855
+  },
+  "bed": {
+    "center_xyz_m": [0.45, 0.0, 0.10],
+    "normal": [0.0, 0.0, 1.0],
+    "min_clearance_m": 0.004
+  },
+  "nozzle_tcp": {
+    "flange_to_nozzle_xyz_m": [0.0, 0.0, 0.115],
+    "flange_to_nozzle_rpy_rad": [0.0, 0.0, 0.0]
+  },
+  "path_preparation": {
+    "max_seg_len_mm": 3.0,
+    "simplify_deg": 0.8
+  },
+  "ik": {
+    "pos_tol_m": 0.008,
+    "rot_tol_rad": 0.08,
+    "max_iters": 180,
+    "damping": 0.035,
+    "orientation_weight": 0.35,
+    "nullspace_weight": 0.015,
+    "max_joint_step_rad": 0.10,
+    "yaw_samples": 13,
+    "ik_stride": 1,
+    "max_waypoints": null
+  }
+}
