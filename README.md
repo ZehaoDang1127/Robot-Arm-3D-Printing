@@ -1,27 +1,30 @@
-# Cura G-code to Franka Panda Printing Path
+# Robotic Printing Platform
 
-This repository now contains a Python pipeline for turning Cura/Marlin G-code
-into a Franka Panda joint trajectory that can be inspected visually and replayed
-in Isaac Sim.
+This project converts Cura/Marlin G-code into robot-ready printing waypoints,
+then solves a robot-specific trajectory for simulation or export. The code is
+now organized so the parser, material/extrusion model, path planner, and robot
+solver can evolve independently.
 
-## Files
+## Package Layout
 
-- `gcode_parser.py` can parse Cura G-code into motion commands.
-- `stage2_pathprep.py` can clean, simplify, densify, and transform paths into a
-  Franka base-frame waypoint list.
-- `stage3_franka_ik.py` solves Panda IK with yaw-redundancy optimization.
-- `franka_panda_parameters.py` stores extracted Franka modified-DH and dynamic
-  parameters from the referenced MATLAB model.
-- `planner_config.json` stores robot home/limits, bed transform, nozzle TCP,
-  path-prep defaults, and IK tolerances.
-- `export_isaac.py` writes CSV/JSON trajectories and an Isaac Sim replay script.
-- `visualize_pipeline.py` writes SVG path and joint-motion visualizations.
-- `run_pipeline.py` runs the stages from one command.
+- `robotic_printing_platform/gcode/` parses G-code motion, including explicit
+  `E` extrusion words, absolute extruder state, per-move `de`, feedrate, layers,
+  travels, and retractions.
+- `robotic_printing_platform/extrusion/` converts raw `E` deltas into
+  material-specific volume and optional mass using a swappable
+  `MaterialProfile`.
+- `robotic_printing_platform/path_planning/` contains the default
+  `LayeredPathPlanner` plus the `PathPlanningAlgorithm` interface. Replace this
+  module when you want a different ordering, smoothing, non-planar planning, or
+  nozzle-normal strategy.
+- `robotic_printing_platform/robots/` contains the `RobotPlanner` interface and
+  the default `FrankaPandaPlanner`. Add another robot by implementing
+  `RobotPlanner.solve(path)`.
+- `robotic_printing_platform/exporters/` writes simulator/runtime artifacts.
 
-Important limitation: the included IK is a lightweight NumPy implementation for
-planning and simulation export. For real printing, calibrate the nozzle TCP,
-bed transform, and Panda model in Isaac Sim or Pinocchio, then tighten the IK
-tolerances before sending anything to hardware.
+Top-level scripts stay small: `run_pipeline.py` runs the workflow and
+`visualize_pipeline.py` writes SVG diagnostics. Core implementation lives in
+the `robotic_printing_platform/` package.
 
 ## Install
 
@@ -31,12 +34,12 @@ Use Python 3.10+.
 pip install -r requirements.txt
 ```
 
-The only pip dependency is `numpy`. Isaac Sim is installed separately through
+The runtime dependency is `numpy`. Isaac Sim is installed separately through
 NVIDIA Omniverse or NVIDIA's Isaac Sim container.
 
 ## Quick Run
 
-Run only parsing, path preparation, and visualization:
+Run parsing, path preparation, and visualization:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --lo 0 --hi 1 --skip-ik --output-dir outputs
@@ -48,122 +51,72 @@ Run a small IK/export smoke test:
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --lo 0 --hi 1 --max-seg-len-mm 20 --simplify-deg 2 --max-ik-waypoints 30 --output-dir outputs
 ```
 
-Run a coarser preview over more waypoints:
-
-```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --lo 0 --hi 3 --max-seg-len-mm 10 --ik-stride 5 --output-dir outputs_preview
-```
-
-Use a different planner configuration:
+Use a different configuration:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --config planner_config.json --lo 0 --hi 1
 ```
 
-Full-resolution IK over the whole model can be slow. Start with one layer,
-large segment lengths, or `--ik-stride`, then refine once the placement and
-solver tolerances look good.
+Process every parsed layer:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode --all-layers --skip-ik --output-dir verify_all_layers
+```
+
+For a coarse all-layer IK preview, keep the full path but sample the IK solve:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode --all-layers --max-seg-len-mm 20 --simplify-deg 2 --ik-stride 5000 --output-dir verify_all_layers_preview
+```
+
+## Changing Material
+
+Edit the `material` section in `planner_config.json`:
+
+```json
+{
+  "material": {
+    "name": "PLA",
+    "filament_diameter_mm": 1.75,
+    "flow_multiplier": 1.0,
+    "density_g_cm3": 1.24
+  }
+}
+```
+
+The parser preserves raw G-code extrusion as `Move.e`, `Move.de`, and
+`Move.has_e`. The planner maps `de` into each waypoint's
+`extrusion_volume_mm3`, `extrusion_mass_g`, and `material`.
+
+## Changing Path Planning
+
+Implement `robotic_printing_platform.path_planning.base.PathPlanningAlgorithm`
+and return a `PathPrep`-compatible object. The default implementation is
+`LayeredPathPlanner`, which groups print/travel runs, simplifies collinear print
+vertices, densifies long segments, places the path on the bed, and assigns a
+planar downward nozzle axis.
+
+## Changing Robot
+
+Implement `robotic_printing_platform.robots.base.RobotPlanner`. The current
+`FrankaPandaPlanner` wraps the NumPy Franka Panda IK solver and exports joint
+trajectories. A new robot can consume the same `PathPrep.waypoints` and produce
+its own trajectory/export format.
+
+Important limitation: the included Franka IK is a lightweight NumPy
+implementation for planning and simulation export. For real printing, calibrate
+the nozzle TCP, bed transform, and robot model in your production stack before
+sending anything to hardware.
 
 ## Outputs
 
 The pipeline writes files under `--output-dir`.
 
-- `gcode_path.svg`: top view of parsed Cura print and travel moves.
-- `robot_waypoints.svg`: top view after placement into the Franka base frame.
+- `gcode_path.svg`: top view of parsed print and travel moves.
+- `robot_waypoints.svg`: top view after placement in robot base coordinates.
+- `robot_waypoints_xz.svg`: side view in robot base XZ coordinates.
 - `joint_trajectory.svg`: per-step joint-motion plot after IK.
-- `franka_print_trajectory.csv`: joint trajectory plus position, extrusion,
-  layer, segment, and IK residual columns.
+- `franka_print_trajectory.csv`: joint trajectory plus position, feed,
+  extrusion, material, layer, segment, and IK residual columns.
 - `franka_print_trajectory.json`: same data in structured form.
-- `replay_isaac.py`: starter Isaac Sim script for replaying the joint path.
-
-Open the `.svg` files in a browser.
-
-## Isaac Sim Replay
-
-After generating outputs, open Isaac Sim's Python environment and run:
-
-```bash
-./python.sh outputs/replay_isaac.py
-```
-
-If Isaac cannot find the Franka asset, edit `FRANKA_USD` near the top of
-`outputs/replay_isaac.py`. Isaac Sim asset paths vary by release.
-
-## Pipeline Details
-
-1. `gcode_parser.py`
-   - Handles `G0/G1`, `G90/G91`, `M82/M83`, `G92`, units, Cura layer comments,
-     feed rates, retractions, and travel moves.
-   - Keeps coordinates in printer millimeters.
-
-2. `stage2_pathprep.py`
-   - Groups print and travel runs.
-   - Simplifies near-collinear print vertices.
-   - Densifies long segments.
-   - Recenters the part on a virtual bed.
-   - Converts printer millimeters to robot-base meters.
-
-3. `stage3_franka_ik.py`
-   - Uses the extracted modified-DH Panda model from
-     `franka_panda_parameters.py` and damped least-squares IK.
-   - Preserves print order for printability.
-   - Optimizes robot motion by trying yaw candidates and choosing the solution
-     closest to the previous joint state.
-   - Checks joint limits, reach, and simple bed clearance.
-   - Records residual position/orientation errors for every point.
-
-`compare_franka_models.py` prints the difference between the previous inline
-Stage-3 kinematic constants and the extracted modified-DH parameter model.
-
-4. `export_isaac.py`
-   - Exports simulator-friendly CSV/JSON.
-   - Generates a simple Isaac Sim replay script.
-
-## Coordinate Setup
-
-The default bed and nozzle placement live in `planner_config.json`.
-
-The default bed placement is:
-
-- bed center: `(0.45, 0.0)` meters in the Franka base frame
-- bed height: `0.10` meters
-
-Change this with:
-
-```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --bed-x-m 0.40 --bed-y-m 0.00 --bed-z-m 0.20
-```
-
-The `PathPrep.summary()` output reports reach from the robot base. Keep the
-path well inside the Panda workspace before running IK.
-
-## Planner Config
-
-Edit `planner_config.json` when you want persistent calibrated values.
-
-- `robot.home_q_rad`: nominal Panda seed posture.
-- `robot.joint_limits_rad`: joint limits used by IK.
-- `robot.max_reach_m`: reach warning threshold.
-- `bed.center_xyz_m`: print-bed center in Franka base coordinates.
-- `bed.min_clearance_m`: simple bed-clearance warning margin.
-- `nozzle_tcp.flange_to_nozzle_xyz_m`: nozzle TCP translation from final Panda
-  link frame.
-- `nozzle_tcp.flange_to_nozzle_rpy_rad`: nozzle TCP roll, pitch, yaw.
-- `path_preparation.max_seg_len_mm`: waypoint spacing after densification.
-- `path_preparation.simplify_deg`: collinear simplification tolerance.
-- `ik`: numerical IK tolerances and solver settings.
-
-Command-line flags like `--bed-z-m`, `--max-seg-len-mm`, and `--ik-stride`
-override the config for that run only.
-
-## Reading IK Results
-
-The IK summary can say `incomplete` while still generating trajectory points.
-That means best-effort poses were exported, but some waypoints exceeded the
-configured residual tolerance. Check these CSV columns:
-
-- `pos_error_m`
-- `rot_error_rad`
-
-For physical printing, those errors must be much smaller than your acceptable
-bead width and layer-height tolerance.
+- `replay_isaac.py`: starter Isaac Sim replay script.

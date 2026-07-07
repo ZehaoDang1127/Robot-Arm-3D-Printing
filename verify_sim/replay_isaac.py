@@ -18,7 +18,7 @@ from omni.isaac.core import World
 from omni.isaac.core.articulations import Articulation
 from omni.isaac.core.utils.stage import add_reference_to_stage
 
-TRAJECTORY_CSV = Path(r"D:\HAIM_Lab\gcode_parsing\verify_sim\franka_print_trajectory.csv")
+TRAJECTORY_CSV = Path(r"D:\HAIM_Lab\robotic-printing-platform\verify_sim\franka_print_trajectory.csv")
 FRANKA_USD = "/Isaac/Robots/Franka/franka.usd"
 ROBOT_PRIM = "/World/Franka"
 

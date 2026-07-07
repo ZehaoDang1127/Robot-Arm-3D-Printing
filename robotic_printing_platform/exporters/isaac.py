@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stage3_franka_ik import RobotTrajectory
+from robotic_printing_platform.robots.franka_panda import RobotTrajectory
 
 
 ISAAC_SCRIPT = r'''"""

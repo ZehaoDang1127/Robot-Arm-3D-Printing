@@ -49,8 +49,10 @@ class Move:
     x: float            # absolute target, mm
     y: float
     z: float
+    e: float            # absolute extruder position after this move, mm
     de: float           # filament extruded on THIS move, mm (>0 deposit, <0 retract)
     f: float            # modal feedrate active for this move, mm/min
+    has_e: bool         # True if this command included an explicit E word
     is_print: bool      # True iff de > 0
     layer: int          # 0-based layer index (Cura comment if present, else z-inferred)
     rapid: bool         # True if issued as G0 (rapid) rather than G1
@@ -204,7 +206,7 @@ def parse_gcode(path: str | Path, *, infer_layers_by_z: bool = True) -> ParseRes
 
             moves.append(Move(
                 x=target["X"], y=target["Y"], z=target["Z"],
-                de=de, f=feed, is_print=is_print,
+                e=e_cur, de=de, f=feed, has_e=("E" in params), is_print=is_print,
                 layer=max(layer, 0), rapid=(word == "G0"),
             ))
             pos = target
