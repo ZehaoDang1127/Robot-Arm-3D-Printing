@@ -2,4 +2,5 @@ __pycache__/
 *.py[cod]
 
 outputs*/
+verify_all_layers*/
 !verify_parse/

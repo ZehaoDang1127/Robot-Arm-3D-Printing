@@ -9,8 +9,9 @@ from typing import Any
 
 import numpy as np
 
-from franka_panda_parameters import STANDARD_PANDA_JOINT_LIMITS_RAD
-from stage3_franka_ik import IKConfig, PANDA_HOME
+from robotic_printing_platform.extrusion import MaterialProfile
+from robotic_printing_platform.robots.franka_panda import IKConfig, PANDA_HOME
+from robotic_printing_platform.robots.franka_panda_parameters import STANDARD_PANDA_JOINT_LIMITS_RAD
 
 
 DEFAULT_CONFIG_PATH = Path("planner_config.json")
@@ -45,10 +46,16 @@ class PathPreparationConfig:
 
 
 @dataclass(frozen=True)
+class MaterialConfig:
+    profile: MaterialProfile
+
+
+@dataclass(frozen=True)
 class PlannerConfig:
     robot: RobotConfig
     bed: BedConfig
     nozzle_tcp: NozzleTCPConfig
+    material: MaterialConfig
     path_preparation: PathPreparationConfig
     ik: dict[str, Any]
 
@@ -104,6 +111,7 @@ def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig
     robot_data = data.get("robot", {})
     bed_data = data.get("bed", {})
     nozzle_data = data.get("nozzle_tcp", {})
+    material_data = data.get("material", {})
     path_data = data.get("path_preparation", {})
 
     robot = RobotConfig(
@@ -134,6 +142,18 @@ def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig
             "nozzle_tcp.flange_to_nozzle_rpy_rad",
         ),
     )
+    material = MaterialConfig(
+        profile=MaterialProfile(
+            name=str(material_data.get("name", "PLA")),
+            filament_diameter_mm=float(material_data.get("filament_diameter_mm", 1.75)),
+            flow_multiplier=float(material_data.get("flow_multiplier", 1.0)),
+            density_g_cm3=(
+                None
+                if material_data.get("density_g_cm3", 1.24) is None
+                else float(material_data.get("density_g_cm3", 1.24))
+            ),
+        )
+    )
     path_preparation = PathPreparationConfig(
         max_seg_len_mm=float(path_data.get("max_seg_len_mm", 3.0)),
         simplify_deg=float(path_data.get("simplify_deg", 0.8)),
@@ -142,7 +162,7 @@ def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig
         robot=robot,
         bed=bed,
         nozzle_tcp=nozzle_tcp,
+        material=material,
         path_preparation=path_preparation,
         ik=dict(data.get("ik", {})),
     )
-

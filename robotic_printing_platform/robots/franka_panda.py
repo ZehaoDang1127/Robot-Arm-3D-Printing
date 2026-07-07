@@ -21,8 +21,12 @@ from pathlib import Path
 
 import numpy as np
 
-from franka_panda_parameters import MODIFIED_DH_LINKS, STANDARD_PANDA_JOINT_LIMITS_RAD
-from stage2_pathprep import PathPrep, Waypoint
+from robotic_printing_platform.path_planning import PathPrep
+from robotic_printing_platform.robots.base import RobotPlanner
+from robotic_printing_platform.robots.franka_panda_parameters import (
+    MODIFIED_DH_LINKS,
+    STANDARD_PANDA_JOINT_LIMITS_RAD,
+)
 
 
 PANDA_JOINT_LIMITS = STANDARD_PANDA_JOINT_LIMITS_RAD
@@ -65,6 +69,9 @@ class TrajectoryPoint:
     seg_id: int
     feed_m_s: float
     de: float
+    material: str
+    extrusion_volume_mm3: float
+    extrusion_mass_g: float | None
     pos_error_m: float
     rot_error_rad: float
 
@@ -117,6 +124,9 @@ class RobotTrajectory:
                     "seg_id",
                     "feed_m_s",
                     "de",
+                    "material",
+                    "extrusion_volume_mm3",
+                    "extrusion_mass_g",
                     "pos_error_m",
                     "rot_error_rad",
                     "q1",
@@ -139,6 +149,9 @@ class RobotTrajectory:
                         pt.seg_id,
                         pt.feed_m_s,
                         pt.de,
+                        pt.material,
+                        pt.extrusion_volume_mm3,
+                        "" if pt.extrusion_mass_g is None else pt.extrusion_mass_g,
                         pt.pos_error_m,
                         pt.rot_error_rad,
                         *pt.q.tolist(),
@@ -170,6 +183,9 @@ class RobotTrajectory:
                     "seg_id": pt.seg_id,
                     "feed_m_s": pt.feed_m_s,
                     "de": pt.de,
+                    "material": pt.material,
+                    "extrusion_volume_mm3": pt.extrusion_volume_mm3,
+                    "extrusion_mass_g": pt.extrusion_mass_g,
                     "pos_error_m": pt.pos_error_m,
                     "rot_error_rad": pt.rot_error_rad,
                 }
@@ -442,6 +458,9 @@ def solve_path_ik(path: PathPrep, cfg: IKConfig | None = None) -> RobotTrajector
                 seg_id=wp.seg_id,
                 feed_m_s=wp.feed_m_s,
                 de=wp.de,
+                material=wp.material,
+                extrusion_volume_mm3=wp.extrusion_volume_mm3,
+                extrusion_mass_g=wp.extrusion_mass_g,
                 pos_error_m=pos_err,
                 rot_error_rad=rot_err,
             )
@@ -457,3 +476,13 @@ def solve_path_ik(path: PathPrep, cfg: IKConfig | None = None) -> RobotTrajector
         estimated_cartesian_length_m=_estimate_length(points),
     )
     return RobotTrajectory(points=points, report=report, config=cfg)
+
+
+@dataclass(frozen=True)
+class FrankaPandaPlanner(RobotPlanner):
+    """Default Franka Panda robot planner."""
+
+    config: IKConfig | None = None
+
+    def solve(self, path: PathPrep) -> RobotTrajectory:
+        return solve_path_ik(path, self.config)

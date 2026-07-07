@@ -7,21 +7,23 @@ from pathlib import Path
 
 import numpy as np
 
-from gcode_parser import ParseResult
-from stage2_pathprep import PathPrep
-from stage3_franka_ik import RobotTrajectory
+from robotic_printing_platform.gcode import ParseResult
+from robotic_printing_platform.path_planning import PathPrep
+from robotic_printing_platform.robots import RobotTrajectory
 
 
-def _project(points: np.ndarray, width: int, height: int, pad: int = 28):
-    pts = points[:, :2]
+def _project(points: np.ndarray, width: int, height: int, pad: int = 28, axes: tuple[int, int] = (0, 1)):
+    pts = points[:, axes]
     lo = pts.min(axis=0)
     hi = pts.max(axis=0)
     span = np.maximum(hi - lo, 1e-9)
     scale = min((width - 2 * pad) / span[0], (height - 2 * pad) / span[1])
 
     def map_point(p):
-        x = pad + (p[0] - lo[0]) * scale
-        y = height - (pad + (p[1] - lo[1]) * scale)
+        u = p[axes[0]]
+        v = p[axes[1]]
+        x = pad + (u - lo[0]) * scale
+        y = height - (pad + (v - lo[1]) * scale)
         return x, y
 
     return map_point
@@ -55,7 +57,7 @@ def plot_gcode_parse(res: ParseResult, path: str | Path) -> Path:
     width, height = 920, 680
     pts = np.array([m.xyz for m in res.moves], dtype=float)
     mapper = _project(pts, width, height)
-    body = ['<g transform="translate(0,34)">']
+    body = ["<g>"]
     for start, end, mv in res.iter_segments():
         color = "#1f77b4" if mv.is_print else "#9aa0a6"
         sw = 1.25 if mv.is_print else 0.75
@@ -70,7 +72,7 @@ def plot_waypoints(pathprep: PathPrep, path: str | Path) -> Path:
     width, height = 920, 680
     P = pathprep.positions()
     mapper = _project(P, width, height)
-    body = ['<g transform="translate(0,34)">']
+    body = ["<g>"]
     current_seg = None
     current_print = False
     current: list[tuple[float, float]] = []
@@ -90,6 +92,32 @@ def plot_waypoints(pathprep: PathPrep, path: str | Path) -> Path:
     body.append('<text x="20" y="620" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#555">red: print, gray: travel, black dot: robot base, top view in base XY</text>')
     body.append("</g>")
     return _write_svg(path, "Prepared Robot Waypoints", "\n".join(body), width, height)
+
+
+def plot_waypoints_xz(pathprep: PathPrep, path: str | Path) -> Path:
+    width, height = 920, 680
+    P = pathprep.positions()
+    mapper = _project(P, width, height, axes=(0, 2))
+    body = ["<g>"]
+    current_seg = None
+    current_print = False
+    current: list[tuple[float, float]] = []
+    for point, wp in zip(P, pathprep.waypoints):
+        if current_seg is None:
+            current_seg = wp.seg_id
+            current_print = wp.is_print
+        if wp.seg_id != current_seg:
+            body.append(_polyline(current, "#d62728" if current_print else "#9aa0a6", 1.4 if current_print else 0.8, 0.9 if current_print else 0.45))
+            current = []
+            current_seg = wp.seg_id
+            current_print = wp.is_print
+        current.append(mapper(point))
+    body.append(_polyline(current, "#d62728" if current_print else "#9aa0a6", 1.4 if current_print else 0.8, 0.9 if current_print else 0.45))
+    bx, bz = mapper(np.array([0.0, 0.0, 0.0]))
+    body.append(f'<circle cx="{bx:.1f}" cy="{bz:.1f}" r="5" fill="#111" />')
+    body.append('<text x="20" y="620" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#555">red: print, gray: travel, black dot: robot base, side view in base XZ</text>')
+    body.append("</g>")
+    return _write_svg(path, "Prepared Robot Waypoints XZ", "\n".join(body), width, height)
 
 
 def plot_joint_trajectory(traj: RobotTrajectory, path: str | Path) -> Path:
@@ -125,8 +153,8 @@ def write_all_plots(
     plots = {
         "gcode": plot_gcode_parse(res, out / "gcode_path.svg"),
         "waypoints": plot_waypoints(pathprep, out / "robot_waypoints.svg"),
+        "waypoints_xz": plot_waypoints_xz(pathprep, out / "robot_waypoints_xz.svg"),
     }
     if traj is not None:
         plots["joints"] = plot_joint_trajectory(traj, out / "joint_trajectory.svg")
     return plots
-

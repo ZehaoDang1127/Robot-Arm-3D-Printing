@@ -34,11 +34,13 @@ Contract for Stage 3 (IK):
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
-from gcode_parser import ParseResult, parse_gcode
+from robotic_printing_platform.extrusion import MaterialProfile, apply_material_profile
+from robotic_printing_platform.gcode import ParseResult, parse_gcode
+from robotic_printing_platform.path_planning.base import PathPlanningAlgorithm
 
 
 # ----------------------------------------------------------------------------
@@ -46,7 +48,7 @@ from gcode_parser import ParseResult, parse_gcode
 # ----------------------------------------------------------------------------
 @dataclass
 class Waypoint:
-    p: np.ndarray            # (3,) position, Franka base frame, metres
+    p: np.ndarray            # (3,) position, robot base frame, metres
     nozzle_axis: np.ndarray  # (3,) unit, target tool approach axis (points toward work)
     yaw: float               # nominal spin about nozzle axis, rad
     yaw_free: bool           # True => redundancy stage may choose yaw freely
@@ -54,7 +56,10 @@ class Waypoint:
     layer: int
     seg_id: int              # contiguous run index; travels get their own ids
     feed_m_s: float
-    de: float                # extrusion for this step (volumetric for UltiGCode)
+    de: float                # raw G-code E delta for this step, mm
+    material: str
+    extrusion_volume_mm3: float
+    extrusion_mass_g: float | None
 
     def pose_matrix(self, yaw: float | None = None) -> np.ndarray:
         """4x4 SE(3) target pose. Tool z-axis == nozzle_axis; yaw spins x,y."""
@@ -202,6 +207,7 @@ def build_waypoints(
     bed_center_xy_m=(0.45, 0.0),
     bed_z_m: float = 0.10,
     max_tilt_deg: float = 0.0,     # 0 => pure planar, nozzle straight down
+    material_profile: MaterialProfile | None = None,
 ) -> PathPrep:
     lo, hi = layers
     runs = _runs_from_moves(res, lo, hi)
@@ -230,10 +236,14 @@ def build_waypoints(
             # planar: surface normal is +Z, nozzle axis is -Z (clamp is a no-op
             # at max_tilt_deg=0; this is where non-planar normals would enter)
             axis = down
+            extrusion = apply_material_profile(de, material_profile)
             waypoints.append(Waypoint(
                 p=p, nozzle_axis=axis, yaw=0.0, yaw_free=True,
                 is_print=is_print, layer=lo, seg_id=seg,
                 feed_m_s=0.0, de=de,
+                material=extrusion.material,
+                extrusion_volume_mm3=extrusion.volume_mm3,
+                extrusion_mass_g=extrusion.mass_g,
             ))
         seg += 1
 
@@ -248,6 +258,35 @@ def build_waypoints(
             w.feed_m_s = fps
 
     return PathPrep(waypoints=waypoints, T_base_bed=T, layers=(lo, hi))
+
+
+@dataclass(frozen=True)
+class LayeredPathPlanner(PathPlanningAlgorithm):
+    """Default layer-by-layer path planner.
+
+    Swap this class for another `PathPlanningAlgorithm` when you want a
+    different ordering, smoothing strategy, non-planar normal assignment, or
+    deposition policy.
+    """
+
+    max_seg_len_mm: float = 1.0
+    simplify_deg: float = 0.5
+    bed_center_xy_m: tuple[float, float] = (0.45, 0.0)
+    bed_z_m: float = 0.10
+    max_tilt_deg: float = 0.0
+    material_profile: MaterialProfile | None = None
+
+    def build(self, res: ParseResult, layers: tuple[int, int]) -> PathPrep:
+        return build_waypoints(
+            res,
+            layers,
+            max_seg_len_mm=self.max_seg_len_mm,
+            simplify_deg=self.simplify_deg,
+            bed_center_xy_m=self.bed_center_xy_m,
+            bed_z_m=self.bed_z_m,
+            max_tilt_deg=self.max_tilt_deg,
+            material_profile=self.material_profile,
+        )
 
 
 if __name__ == "__main__":
