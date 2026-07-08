@@ -5,11 +5,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from export_isaac import export_isaac_bundle
-from gcode_parser import parse_gcode
-from planner_config import DEFAULT_CONFIG_PATH, load_planner_config
-from stage2_pathprep import build_waypoints
-from stage3_franka_ik import solve_path_ik
+from robotic_printing_platform.config import DEFAULT_CONFIG_PATH, load_planner_config
+from robotic_printing_platform.exporters.isaac import export_isaac_bundle
+from robotic_printing_platform.gcode import parse_gcode
+from robotic_printing_platform.path_planning import LayeredPathPlanner
+from robotic_printing_platform.robots import FrankaPandaPlanner
 from visualize_pipeline import write_all_plots
 
 
@@ -31,6 +31,7 @@ def run(
     skip_ik: bool = False,
     ik_stride: int | None = None,
     max_ik_waypoints: int | None = None,
+    all_layers: bool = False,
 ):
     path = Path(path)
     out = Path(output_dir)
@@ -48,15 +49,19 @@ def run(
     print(res.summary())
     print()
 
-    hi = min(hi, res.layer_count)
-    pp = build_waypoints(
-        res,
-        layers=(lo, hi),
+    if all_layers:
+        lo = 0
+        hi = res.layer_count
+    else:
+        hi = min(hi, res.layer_count)
+    path_planner = LayeredPathPlanner(
         max_seg_len_mm=seg_len,
         simplify_deg=simplify,
         bed_center_xy_m=(bed_x, bed_y),
         bed_z_m=bed_z,
+        material_profile=cfg.material.profile,
     )
+    pp = path_planner.build(res, layers=(lo, hi))
     print(f"=== Stage 2: path prep (layers {lo}..{hi - 1}) ===")
     print(pp.summary())
     print()
@@ -65,10 +70,10 @@ def run(
     bundle = {}
     if not skip_ik:
         print("=== Stage 3: Franka IK / yaw optimization ===")
-        traj = solve_path_ik(
-            pp,
-            cfg.make_ik_config(ik_stride=ik_stride, max_waypoints=max_ik_waypoints),
+        robot_planner = FrankaPandaPlanner(
+            cfg.make_ik_config(ik_stride=ik_stride, max_waypoints=max_ik_waypoints)
         )
+        traj = robot_planner.solve(pp)
         print(traj.report.summary())
         if traj.report.warnings:
             print("first warnings:")
@@ -95,6 +100,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("gcode", nargs="?", default=DEFAULT_GCODE, help="Cura/Marlin G-code file")
     parser.add_argument("--lo", type=int, default=0, help="first layer to process, inclusive")
     parser.add_argument("--hi", type=int, default=1, help="last layer to process, exclusive")
+    parser.add_argument("--all-layers", action="store_true", help="process every parsed layer")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="planner JSON config file")
     parser.add_argument("--max-seg-len-mm", type=float, default=None, help="override densified waypoint spacing")
     parser.add_argument("--simplify-deg", type=float, default=None, help="override collinear simplification angle")
@@ -124,4 +130,5 @@ if __name__ == "__main__":
         skip_ik=args.skip_ik,
         ik_stride=args.ik_stride,
         max_ik_waypoints=args.max_ik_waypoints,
+        all_layers=args.all_layers,
     )
