@@ -119,4 +119,21 @@ The pipeline writes files under `--output-dir`.
 - `franka_print_trajectory.csv`: joint trajectory plus position, feed,
   extrusion, material, layer, segment, and IK residual columns.
 - `franka_print_trajectory.json`: same data in structured form.
-- `replay_isaac.py`: starter Isaac Sim replay script.
+- `replay_isaac.py`: starter Isaac Sim replay script with visual deposition
+  markers for print moves.
+
+## Isaac Visual Deposition
+
+The generated `replay_isaac.py` now creates visual bead markers while the robot
+replays print waypoints. It reads `is_print`, `de`, and
+`extrusion_volume_mm3` from the exported CSV, then spawns orange spheres at
+deposition points.
+
+This is visual-only deposition. It does not simulate thermal behavior, flow,
+cooling, bead contact, or the mechanics of a growing part. The deposition
+settings live near the top of the generated Isaac script:
+
+- `DEPOSITION_ENABLED`
+- `DEPOSITION_EVERY_N_PRINT_POINTS`
+- `MAX_DEPOSITION_MARKERS`
+- `BEAD_RADIUS_M`
