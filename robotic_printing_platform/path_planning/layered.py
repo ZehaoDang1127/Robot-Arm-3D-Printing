@@ -16,7 +16,7 @@ IK / redundancy-resolution stage will consume. Three steps:
 
   2. place_on_bed
        - re-centre the part footprint onto a virtual bed and transform from
-         printer-frame millimetres into Franka base-frame metres, via a single
+         printer-frame millimetres into robot base-frame metres, via a single
          configurable T_base_bed transform
 
   3. assign_nozzle_poses
@@ -92,8 +92,7 @@ class PathPrep:
             f"base-frame XYZ : X[{P[:,0].min():.3f}, {P[:,0].max():.3f}]  "
             f"Y[{P[:,1].min():.3f}, {P[:,1].max():.3f}]  "
             f"Z[{P[:,2].min():.3f}, {P[:,2].max():.3f}] m\n"
-            f"reach from base: {reach.min():.3f} .. {reach.max():.3f} m "
-            f"(Franka max ~0.855 m)"
+            f"reach from base: {reach.min():.3f} .. {reach.max():.3f} m"
         )
 
 

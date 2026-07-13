@@ -8,6 +8,7 @@ robotic-printing-platform/
 ├── planner_config.json
 ├── run_pipeline.py
 ├── visualize_pipeline.py
+├── analyze_urdf_ik.py
 ├── strong_universal_wall_hook_vcd.gcode
 ├── strong_universal_wall_hook_vcd.stl
 ├── robotic_printing_platform/
@@ -27,7 +28,12 @@ robotic-printing-platform/
 │   │   ├── __init__.py
 │   │   ├── base.py
 │   │   ├── franka_panda.py
-│   │   └── franka_panda_parameters.py
+│   │   ├── urdf_kinematics.py
+│   │   └── robot_configs/
+│   │       └── franka_panda/
+│   │           ├── README.md
+│   │           ├── robot_config.json
+│   │           └── robot.urdf
 │   └── exporters/
 │       ├── __init__.py
 │       └── isaac.py
@@ -49,6 +55,8 @@ robotic-printing-platform/
 - `planner_config.json` stores robot, bed, nozzle, path planning, IK, and material settings.
 - `run_pipeline.py` is the main CLI entry point for parsing, planning, IK, export, and visualization.
 - `visualize_pipeline.py` writes SVG diagnostics for G-code, robot waypoints, XZ waypoint side view, and joint motion.
+- `analyze_urdf_ik.py` runs direct robot-folder FK, workspace, and IK analysis.
+- `robotic_printing_platform/robots/robot_configs/` stores swappable robot packages. Replace the folder contents or point `robot.config_dir` at another folder to change robots.
 - `strong_universal_wall_hook_vcd.gcode` is the sample sliced print path.
 - `strong_universal_wall_hook_vcd.stl` is the sample source model.
 
@@ -78,8 +86,8 @@ Converts parsed G-code into robot-frame waypoints.
 Converts robot-frame waypoints into robot-specific motion.
 
 - `base.py` defines the `RobotPlanner` interface.
-- `franka_panda.py` implements Franka Panda forward kinematics, IK, yaw sampling, trajectory export data, and `FrankaPandaPlanner`.
-- `franka_panda_parameters.py` stores Franka Panda modified-DH parameters and joint limits.
+- `franka_panda.py` implements the default URDF-backed forward kinematics, IK, yaw sampling, trajectory export data, and `FrankaPandaPlanner`.
+- `urdf_kinematics.py` provides general serial-chain URDF loading, FK, Jacobians, workspace sampling, and damped least-squares IK.
 
 ### `robotic_printing_platform/exporters/`
 
@@ -91,7 +99,7 @@ Writes simulator/runtime outputs.
 
 `verify_sim/` contains a small tracked simulation/export sample:
 
-- `franka_print_trajectory.csv` and `.json` contain the generated robot trajectory and extrusion fields.
+- `robot_print_trajectory.csv` and `.json` contain the generated robot trajectory and extrusion fields.
 - `replay_isaac.py` replays Franka motion in Isaac Sim and creates visual deposited material markers.
 - `gcode_path.svg` shows the parsed G-code path.
 - `robot_waypoints.svg` shows robot waypoints in base-frame XY.

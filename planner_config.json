@@ -1,18 +1,6 @@
 {
   "robot": {
-    "model": "franka_panda",
-    "parameter_source": "franka_panda_parameters.py",
-    "home_q_rad": [0.0, -0.45, 0.0, -2.35, 0.0, 2.05, 0.75],
-    "joint_limits_rad": [
-      [-2.8973, 2.8973],
-      [-1.7628, 1.7628],
-      [-2.8973, 2.8973],
-      [-3.0718, -0.0698],
-      [-2.8973, 2.8973],
-      [-0.0175, 3.7525],
-      [-2.8973, 2.8973]
-    ],
-    "max_reach_m": 0.855
+    "config_dir": "robotic_printing_platform/robots/robot_configs/franka_panda"
   },
   "bed": {
     "center_xyz_m": [0.45, 0.0, 0.10],

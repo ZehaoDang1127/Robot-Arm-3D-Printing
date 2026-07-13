@@ -9,6 +9,7 @@ keeps them in one editable constant near the top.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from robotic_printing_platform.robots.franka_panda import RobotTrajectory
@@ -24,6 +25,7 @@ If your Isaac install stores the Franka USD elsewhere, edit FRANKA_USD below.
 """
 
 import csv
+import json
 from pathlib import Path
 
 from isaacsim import SimulationApp
@@ -36,6 +38,7 @@ from omni.isaac.core.utils.stage import add_reference_to_stage
 from pxr import Gf, Sdf, UsdGeom
 
 TRAJECTORY_CSV = Path(r"{trajectory_csv}")
+JOINT_COLUMNS = {joint_columns}
 FRANKA_USD = "/Isaac/Robots/Franka/franka.usd"
 ROBOT_PRIM = "/World/Franka"
 DEPOSITION_PRIM = "/World/PrintedMaterial"
@@ -51,7 +54,7 @@ def load_rows(path):
     with path.open(newline="") as f:
         for row in csv.DictReader(f):
             rows.append({{
-                "q": [float(row[f"q{{i}}"]) for i in range(1, 8)],
+                "q": [float(row[name]) for name in JOINT_COLUMNS],
                 "p": [float(row["x_m"]), float(row["y_m"]), float(row["z_m"])],
                 "is_print": row.get("is_print", "0") == "1",
                 "de": float(row.get("de") or 0.0),
@@ -132,7 +135,7 @@ simulation_app.close()
 def export_isaac_bundle(
     traj: RobotTrajectory,
     output_dir: str | Path = "outputs",
-    basename: str = "franka_print",
+    basename: str = "robot_print",
 ) -> dict[str, Path]:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -142,5 +145,10 @@ def export_isaac_bundle(
 
     traj.export_csv(csv_path)
     traj.export_json(json_path)
-    script_path.write_text(ISAAC_SCRIPT.format(trajectory_csv=str(csv_path.resolve())))
+    script_path.write_text(
+        ISAAC_SCRIPT.format(
+            trajectory_csv=str(csv_path.resolve()),
+            joint_columns=json.dumps(traj.config.joint_names),
+        )
+    )
     return {"csv": csv_path, "json": json_path, "isaac_script": script_path}

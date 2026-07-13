@@ -10,8 +10,14 @@ from typing import Any
 import numpy as np
 
 from robotic_printing_platform.extrusion import MaterialProfile
-from robotic_printing_platform.robots.franka_panda import IKConfig, PANDA_HOME
-from robotic_printing_platform.robots.franka_panda_parameters import STANDARD_PANDA_JOINT_LIMITS_RAD
+from robotic_printing_platform.robots.franka_panda import (
+    DEFAULT_PANDA_JOINT_NAMES,
+    DEFAULT_PANDA_URDF_PATH,
+    DEFAULT_ROBOT_CONFIG_DIR,
+    IKConfig,
+    PANDA_HOME,
+    PANDA_JOINT_LIMITS,
+)
 
 
 DEFAULT_CONFIG_PATH = Path("planner_config.json")
@@ -21,6 +27,11 @@ DEFAULT_CONFIG_PATH = Path("planner_config.json")
 class RobotConfig:
     model: str
     parameter_source: str
+    config_dir: str
+    urdf_path: str
+    base_link: str
+    end_link: str
+    joint_names: list[str]
     home_q_rad: np.ndarray
     joint_limits_rad: np.ndarray
     max_reach_m: float
@@ -72,6 +83,10 @@ class PlannerConfig:
             ik["max_waypoints"] = max_waypoints
 
         return IKConfig(
+            urdf_path=self.robot.urdf_path,
+            base_link=self.robot.base_link,
+            end_link=self.robot.end_link,
+            joint_names=list(self.robot.joint_names),
             pos_tol_m=float(ik.get("pos_tol_m", 0.008)),
             rot_tol_rad=float(ik.get("rot_tol_rad", 0.08)),
             max_iters=int(ik.get("max_iters", 180)),
@@ -105,10 +120,37 @@ def _as_array(value: Any, shape: tuple[int, ...], name: str) -> np.ndarray:
     return arr
 
 
-def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+def _resolve_path(value: str | Path, base_dir: Path) -> str:
+    path = Path(value)
+    if path.is_absolute():
+        return str(path)
+    return str((base_dir / path).resolve())
 
-    robot_data = data.get("robot", {})
+
+def _load_robot_folder_config(robot_data: dict[str, Any], config_base_dir: Path) -> tuple[dict[str, Any], Path]:
+    config_dir_value = robot_data.get("config_dir", DEFAULT_ROBOT_CONFIG_DIR)
+    config_dir = Path(config_dir_value)
+    if not config_dir.is_absolute():
+        config_dir = (config_base_dir / config_dir).resolve()
+
+    robot_config_path = config_dir / "robot_config.json"
+    folder_data: dict[str, Any] = {}
+    if robot_config_path.exists():
+        folder_data = json.loads(robot_config_path.read_text(encoding="utf-8"))
+
+    merged = {**folder_data, **robot_data}
+    merged["config_dir"] = str(config_dir)
+    if "urdf_path" in merged:
+        merged["urdf_path"] = _resolve_path(merged["urdf_path"], config_dir)
+    return merged, config_dir
+
+
+def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig:
+    config_path = Path(path)
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    config_base_dir = config_path.parent.resolve()
+
+    robot_data, robot_config_dir = _load_robot_folder_config(data.get("robot", {}), config_base_dir)
     bed_data = data.get("bed", {})
     nozzle_data = data.get("nozzle_tcp", {})
     material_data = data.get("material", {})
@@ -116,11 +158,20 @@ def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig
 
     robot = RobotConfig(
         model=str(robot_data.get("model", "franka_panda")),
-        parameter_source=str(robot_data.get("parameter_source", "franka_panda_parameters.py")),
-        home_q_rad=_as_array(robot_data.get("home_q_rad", PANDA_HOME.tolist()), (7,), "robot.home_q_rad"),
+        parameter_source=str(robot_data.get("parameter_source", "robot_config_folder")),
+        config_dir=str(robot_data.get("config_dir", robot_config_dir)),
+        urdf_path=str(robot_data.get("urdf_path", DEFAULT_PANDA_URDF_PATH)),
+        base_link=str(robot_data.get("base_link", "panda_link0")),
+        end_link=str(robot_data.get("end_link", "panda_link8")),
+        joint_names=[str(name) for name in robot_data.get("joint_names", DEFAULT_PANDA_JOINT_NAMES)],
+        home_q_rad=_as_array(
+            robot_data.get("home_q_rad", PANDA_HOME.tolist()),
+            (len(robot_data.get("joint_names", DEFAULT_PANDA_JOINT_NAMES)),),
+            "robot.home_q_rad",
+        ),
         joint_limits_rad=_as_array(
-            robot_data.get("joint_limits_rad", STANDARD_PANDA_JOINT_LIMITS_RAD.tolist()),
-            (7, 2),
+            robot_data.get("joint_limits_rad", PANDA_JOINT_LIMITS.tolist()),
+            (len(robot_data.get("joint_names", DEFAULT_PANDA_JOINT_NAMES)), 2),
             "robot.joint_limits_rad",
         ),
         max_reach_m=float(robot_data.get("max_reach_m", 0.855)),

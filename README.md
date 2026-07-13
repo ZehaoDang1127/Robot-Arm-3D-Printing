@@ -17,14 +17,16 @@ solver can evolve independently.
   `LayeredPathPlanner` plus the `PathPlanningAlgorithm` interface. Replace this
   module when you want a different ordering, smoothing, non-planar planning, or
   nozzle-normal strategy.
-- `robotic_printing_platform/robots/` contains the `RobotPlanner` interface and
-  the default `FrankaPandaPlanner`. Add another robot by implementing
-  `RobotPlanner.solve(path)`.
+- `robotic_printing_platform/robots/` contains the `RobotPlanner` interface,
+  URDF kinematics helpers, robot configuration folders, and the default
+  URDF-backed planner. The default robot package is
+  `robotic_printing_platform/robots/robot_configs/franka_panda/`.
 - `robotic_printing_platform/exporters/` writes simulator/runtime artifacts.
 
 Top-level scripts stay small: `run_pipeline.py` runs the workflow and
-`visualize_pipeline.py` writes SVG diagnostics. Core implementation lives in
-the `robotic_printing_platform/` package.
+`visualize_pipeline.py` writes SVG diagnostics. `analyze_urdf_ik.py` runs direct
+URDF FK/workspace/IK checks. Core implementation lives in the
+`robotic_printing_platform/` package.
 
 ## Install
 
@@ -55,6 +57,12 @@ Use a different configuration:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --config planner_config.json --lo 0 --hi 1
+```
+
+Run a direct robot-folder IK analysis:
+
+```bash
+python analyze_urdf_ik.py --robot-config-dir robotic_printing_platform/robots/robot_configs/franka_panda --samples 500 --target 0.45 0.0 0.25
 ```
 
 Process every parsed layer:
@@ -99,9 +107,12 @@ planar downward nozzle axis.
 ## Changing Robot
 
 Implement `robotic_printing_platform.robots.base.RobotPlanner`. The current
-`FrankaPandaPlanner` wraps the NumPy Franka Panda IK solver and exports joint
-trajectories. A new robot can consume the same `PathPrep.waypoints` and produce
-its own trajectory/export format.
+planner loads its arm geometry from the folder named by
+`planner_config.json -> robot.config_dir`, wraps the NumPy URDF IK solver, and
+exports joint trajectories. To swap from Franka Panda to UR5 or another serial
+arm, copy `robotic_printing_platform/robots/robot_configs/franka_panda/`,
+replace `robot.urdf`, edit `robot_config.json`, then point `robot.config_dir`
+at the new folder.
 
 Important limitation: the included Franka IK is a lightweight NumPy
 implementation for planning and simulation export. For real printing, calibrate
@@ -116,9 +127,9 @@ The pipeline writes files under `--output-dir`.
 - `robot_waypoints.svg`: top view after placement in robot base coordinates.
 - `robot_waypoints_xz.svg`: side view in robot base XZ coordinates.
 - `joint_trajectory.svg`: per-step joint-motion plot after IK.
-- `franka_print_trajectory.csv`: joint trajectory plus position, feed,
+- `robot_print_trajectory.csv`: joint trajectory plus position, feed,
   extrusion, material, layer, segment, and IK residual columns.
-- `franka_print_trajectory.json`: same data in structured form.
+- `robot_print_trajectory.json`: same data in structured form.
 - `replay_isaac.py`: starter Isaac Sim replay script with visual deposition
   markers for print moves.
 

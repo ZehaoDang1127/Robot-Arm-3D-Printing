@@ -1,0 +1,128 @@
+<?xml version="1.0"?>
+<robot name="franka_panda_planning">
+  <!--
+    Minimal Franka Panda kinematic URDF for this platform's dependency-light
+    planner. The chain encodes the Franka Panda planning geometry as modified-DH
+    style transforms:
+
+      T_i = Rx(alpha_i) Tx(a_i) Rz(q_i) Tz(d_i)
+
+    Each revolute joint is followed by a fixed z-offset joint when d_i is
+    nonzero. Visual geometry is intentionally simple because the file is used
+    for kinematics and IK analysis, not high-fidelity rendering.
+  -->
+
+  <link name="panda_link0"/>
+  <link name="panda_joint1_rot"/>
+  <link name="panda_link1"/>
+  <link name="panda_joint2_rot"/>
+  <link name="panda_link2"/>
+  <link name="panda_joint3_rot"/>
+  <link name="panda_link3"/>
+  <link name="panda_joint4_rot"/>
+  <link name="panda_link4"/>
+  <link name="panda_joint5_rot"/>
+  <link name="panda_link5"/>
+  <link name="panda_joint6_rot"/>
+  <link name="panda_link6"/>
+  <link name="panda_joint7_rot"/>
+  <link name="panda_link7"/>
+  <link name="panda_link8"/>
+
+  <joint name="panda_joint1" type="revolute">
+    <parent link="panda_link0"/>
+    <child link="panda_joint1_rot"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="87" velocity="2.175"/>
+  </joint>
+  <joint name="panda_joint1_offset" type="fixed">
+    <parent link="panda_joint1_rot"/>
+    <child link="panda_link1"/>
+    <origin xyz="0 0 0.333" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="panda_joint2" type="revolute">
+    <parent link="panda_link1"/>
+    <child link="panda_joint2_rot"/>
+    <origin xyz="0 0 0" rpy="-1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.7628" upper="1.7628" effort="87" velocity="2.175"/>
+  </joint>
+  <joint name="panda_joint2_offset" type="fixed">
+    <parent link="panda_joint2_rot"/>
+    <child link="panda_link2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="panda_joint3" type="revolute">
+    <parent link="panda_link2"/>
+    <child link="panda_joint3_rot"/>
+    <origin xyz="0 0 0" rpy="1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="87" velocity="2.175"/>
+  </joint>
+  <joint name="panda_joint3_offset" type="fixed">
+    <parent link="panda_joint3_rot"/>
+    <child link="panda_link3"/>
+    <origin xyz="0 0 0.316" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="panda_joint4" type="revolute">
+    <parent link="panda_link3"/>
+    <child link="panda_joint4_rot"/>
+    <origin xyz="0.0825 0 0" rpy="1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.0718" upper="-0.0698" effort="87" velocity="2.175"/>
+  </joint>
+  <joint name="panda_joint4_offset" type="fixed">
+    <parent link="panda_joint4_rot"/>
+    <child link="panda_link4"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="panda_joint5" type="revolute">
+    <parent link="panda_link4"/>
+    <child link="panda_joint5_rot"/>
+    <origin xyz="-0.0825 0 0" rpy="-1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="12" velocity="2.61"/>
+  </joint>
+  <joint name="panda_joint5_offset" type="fixed">
+    <parent link="panda_joint5_rot"/>
+    <child link="panda_link5"/>
+    <origin xyz="0 0 0.384" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="panda_joint6" type="revolute">
+    <parent link="panda_link5"/>
+    <child link="panda_joint6_rot"/>
+    <origin xyz="0 0 0" rpy="1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.0175" upper="3.7525" effort="12" velocity="2.61"/>
+  </joint>
+  <joint name="panda_joint6_offset" type="fixed">
+    <parent link="panda_joint6_rot"/>
+    <child link="panda_link6"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="panda_joint7" type="revolute">
+    <parent link="panda_link6"/>
+    <child link="panda_joint7_rot"/>
+    <origin xyz="0.088 0 0" rpy="1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="12" velocity="2.61"/>
+  </joint>
+  <joint name="panda_joint7_offset" type="fixed">
+    <parent link="panda_joint7_rot"/>
+    <child link="panda_link7"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="panda_flange" type="fixed">
+    <parent link="panda_link7"/>
+    <child link="panda_link8"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+</robot>

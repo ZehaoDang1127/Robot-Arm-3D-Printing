@@ -1,8 +1,8 @@
 """
-Stage 3: Franka Panda inverse kinematics and continuity optimization.
+Stage 3: URDF-based inverse kinematics and continuity optimization.
 
 This module intentionally stays dependency-light: NumPy only. It implements a
-practical Panda kinematic chain, damped least-squares IK, joint-limit checks,
+practical serial-chain kinematics, damped least-squares IK, joint-limit checks,
 simple table/nozzle collision checks, and redundancy handling by trying several
 tool-yaw candidates while always seeding from the previous accepted joint state.
 
@@ -17,30 +17,46 @@ import csv
 import json
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
 from robotic_printing_platform.path_planning import PathPrep
 from robotic_printing_platform.robots.base import RobotPlanner
-from robotic_printing_platform.robots.franka_panda_parameters import (
-    MODIFIED_DH_LINKS,
-    STANDARD_PANDA_JOINT_LIMITS_RAD,
+from robotic_printing_platform.robots.urdf_kinematics import URDFKinematicChain, load_urdf_chain
+
+
+PANDA_JOINT_LIMITS = np.array(
+    [
+        [-2.8973, 2.8973],
+        [-1.7628, 1.7628],
+        [-2.8973, 2.8973],
+        [-3.0718, -0.0698],
+        [-2.8973, 2.8973],
+        [-0.0175, 3.7525],
+        [-2.8973, 2.8973],
+    ],
+    dtype=float,
 )
-
-
-PANDA_JOINT_LIMITS = STANDARD_PANDA_JOINT_LIMITS_RAD
 PANDA_HOME = np.array([0.0, -0.45, 0.0, -2.35, 0.0, 2.05, 0.75], dtype=float)
+DEFAULT_ROBOT_CONFIG_DIR = Path(__file__).resolve().parent / "robot_configs" / "franka_panda"
+DEFAULT_PANDA_URDF_PATH = DEFAULT_ROBOT_CONFIG_DIR / "robot.urdf"
+DEFAULT_PANDA_JOINT_NAMES = [f"panda_joint{i}" for i in range(1, 8)]
 
 
 @dataclass
 class IKConfig:
+    urdf_path: str = str(DEFAULT_PANDA_URDF_PATH)
+    base_link: str = "panda_link0"
+    end_link: str = "panda_link8"
+    joint_names: list[str] = field(default_factory=lambda: DEFAULT_PANDA_JOINT_NAMES.copy())
     tool_length_m: float = 0.115
     tool_tcp_xyz_m: tuple[float, float, float] | None = None
     tool_tcp_rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0)
     # The bundled NumPy-only model is intended for planning/simulation export.
     # Keep these tolerances visible in output files; tighten them after
-    # calibrating the actual nozzle TCP and Panda model in Isaac/Pinocchio.
+    # calibrating the actual nozzle TCP and robot model in Isaac/Pinocchio.
     pos_tol_m: float = 0.008
     rot_tol_rad: float = 0.08
     max_iters: int = 180
@@ -112,6 +128,7 @@ class RobotTrajectory:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="") as f:
             writer = csv.writer(f)
+            joint_names = self.config.joint_names or [f"q{i + 1}" for i in range(len(self.points[0].q) if self.points else 0)]
             writer.writerow(
                 [
                     "index",
@@ -129,13 +146,7 @@ class RobotTrajectory:
                     "extrusion_mass_g",
                     "pos_error_m",
                     "rot_error_rad",
-                    "q1",
-                    "q2",
-                    "q3",
-                    "q4",
-                    "q5",
-                    "q6",
-                    "q7",
+                    *joint_names,
                 ]
             )
             for pt in self.points:
@@ -162,7 +173,7 @@ class RobotTrajectory:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "joint_names": [f"panda_joint{i}" for i in range(1, 8)],
+            "joint_names": self.config.joint_names,
             "success": self.report.success,
             "report": {
                 "attempted": self.report.attempted,
@@ -195,35 +206,6 @@ class RobotTrajectory:
         path.write_text(json.dumps(payload, indent=2))
 
 
-def _modified_dh(theta: float, d: float, a: float, alpha: float) -> np.ndarray:
-    """Peter Corke modified-DH transform: Rx(alpha) Tx(a) Rz(theta) Tz(d)."""
-    ca, sa = math.cos(alpha), math.sin(alpha)
-    ct, st = math.cos(theta), math.sin(theta)
-    return np.array(
-        [
-            [ct, -st, 0.0, a],
-            [st * ca, ct * ca, -sa, -d * sa],
-            [st * sa, ct * sa, ca, d * ca],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=float,
-    )
-
-
-def _modified_dh_joint_frame(a: float, alpha: float) -> np.ndarray:
-    """Transform from previous link frame to the current modified-DH joint axis."""
-    ca, sa = math.cos(alpha), math.sin(alpha)
-    return np.array(
-        [
-            [1.0, 0.0, 0.0, a],
-            [0.0, ca, -sa, 0.0],
-            [0.0, sa, ca, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-        dtype=float,
-    )
-
-
 def _rpy_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
     cr, sr = math.cos(roll), math.sin(roll)
     cp, sp = math.cos(pitch), math.sin(pitch)
@@ -239,7 +221,7 @@ def _tool_transform(
     tool_tcp_xyz_m: tuple[float, float, float] | None = None,
     tool_tcp_rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> np.ndarray:
-    """Nozzle TCP transform from final Panda link frame."""
+    """Nozzle TCP transform from final robot link frame."""
     xyz = tool_tcp_xyz_m if tool_tcp_xyz_m is not None else (0.0, 0.0, tool_length_m)
     T = np.eye(4)
     T[:3, :3] = _rpy_matrix(*tool_tcp_rpy_rad)
@@ -247,45 +229,55 @@ def _tool_transform(
     return T
 
 
+@lru_cache(maxsize=16)
+def _load_cached_chain(urdf_path: str, base_link: str, end_link: str) -> URDFKinematicChain:
+    return load_urdf_chain(urdf_path, base_link=base_link, end_link=end_link)
+
+
+def _panda_chain(
+    urdf_path: str | Path = DEFAULT_PANDA_URDF_PATH,
+    base_link: str = "panda_link0",
+    end_link: str = "panda_link8",
+) -> URDFKinematicChain:
+    return _load_cached_chain(str(Path(urdf_path)), base_link, end_link)
+
+
 def panda_fk(
     q: np.ndarray,
     tool_length_m: float = 0.115,
     tool_tcp_xyz_m: tuple[float, float, float] | None = None,
     tool_tcp_rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    urdf_path: str | Path = DEFAULT_PANDA_URDF_PATH,
+    base_link: str = "panda_link0",
+    end_link: str = "panda_link8",
 ) -> tuple[np.ndarray, list[np.ndarray]]:
     """Return tool-center pose and all intermediate link transforms.
 
-    The arm geometry is loaded from `franka_panda_parameters.MODIFIED_DH_LINKS`,
-    extracted from the referenced MATLAB `panda7dof_robot_gen.m` file. The list
-    of transforms contains the base frame, each link frame, and the final TCP.
+    The arm geometry is loaded from a URDF chain. The list of transforms contains
+    the base frame, each URDF joint/link frame, and the final TCP.
     """
     q = np.asarray(q, dtype=float)
-    if q.shape != (7,):
-        raise ValueError(f"expected 7 Panda joints, got shape {q.shape}")
-    T = np.eye(4)
-    Ts = [T.copy()]
-    for qi, link in zip(q, MODIFIED_DH_LINKS):
-        theta = float(qi + link.theta_offset_rad)
-        T = T @ _modified_dh(theta, link.d_m, link.a_m, link.alpha_rad)
-        Ts.append(T.copy())
-    T = T @ _tool_transform(tool_length_m, tool_tcp_xyz_m, tool_tcp_rpy_rad)
-    Ts.append(T.copy())
-    return T, Ts
+    chain = _panda_chain(urdf_path, base_link, end_link)
+    if q.shape != (len(chain.active_joints),):
+        raise ValueError(f"expected {len(chain.active_joints)} joints, got shape {q.shape}")
+    return chain.fk(q, _tool_transform(tool_length_m, tool_tcp_xyz_m, tool_tcp_rpy_rad))
 
 
-def panda_joint_frames(q: np.ndarray) -> list[np.ndarray]:
-    """Return base-frame transforms of the seven modified-DH joint axes."""
+def panda_joint_frames(
+    q: np.ndarray,
+    urdf_path: str | Path = DEFAULT_PANDA_URDF_PATH,
+    base_link: str = "panda_link0",
+    end_link: str = "panda_link8",
+) -> list[np.ndarray]:
+    """Return base-frame transforms of the active URDF joint axes."""
     q = np.asarray(q, dtype=float)
-    if q.shape != (7,):
-        raise ValueError(f"expected 7 Panda joints, got shape {q.shape}")
-
-    T = np.eye(4)
-    frames: list[np.ndarray] = []
-    for qi, link in zip(q, MODIFIED_DH_LINKS):
-        joint_T = T @ _modified_dh_joint_frame(link.a_m, link.alpha_rad)
-        frames.append(joint_T.copy())
-        theta = float(qi + link.theta_offset_rad)
-        T = T @ _modified_dh(theta, link.d_m, link.a_m, link.alpha_rad)
+    chain = _panda_chain(urdf_path, base_link, end_link)
+    if q.shape != (len(chain.active_joints),):
+        raise ValueError(f"expected {len(chain.active_joints)} joints, got shape {q.shape}")
+    frames = []
+    for joint, frame in zip(chain.joints, chain.joint_frames(q)):
+        if joint.active:
+            frames.append(frame)
     return frames
 
 
@@ -294,17 +286,13 @@ def geometric_jacobian(
     tool_length_m: float,
     tool_tcp_xyz_m: tuple[float, float, float] | None = None,
     tool_tcp_rpy_rad: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    urdf_path: str | Path = DEFAULT_PANDA_URDF_PATH,
+    base_link: str = "panda_link0",
+    end_link: str = "panda_link8",
 ) -> np.ndarray:
-    T_tool, _ = panda_fk(q, tool_length_m, tool_tcp_xyz_m, tool_tcp_rpy_rad)
-    pe = T_tool[:3, 3]
-    joint_frames = panda_joint_frames(q)
-    J = np.zeros((6, 7), dtype=float)
-    for i, joint_T in enumerate(joint_frames):
-        zi = joint_T[:3, 2]
-        pi = joint_T[:3, 3]
-        J[:3, i] = np.cross(zi, pe - pi)
-        J[3:, i] = zi
-    return J
+    chain = _panda_chain(urdf_path, base_link, end_link)
+    tcp_t = _tool_transform(tool_length_m, tool_tcp_xyz_m, tool_tcp_rpy_rad)
+    return chain.jacobian(q, tcp_t)
 
 
 def _rotvec_error(R_cur: np.ndarray, R_goal: np.ndarray) -> np.ndarray:
@@ -346,7 +334,15 @@ def solve_ik(
     best_rot = float("inf")
 
     for _ in range(cfg.max_iters):
-        cur_T, _ = panda_fk(q, cfg.tool_length_m, cfg.tool_tcp_xyz_m, cfg.tool_tcp_rpy_rad)
+        cur_T, _ = panda_fk(
+            q,
+            cfg.tool_length_m,
+            cfg.tool_tcp_xyz_m,
+            cfg.tool_tcp_rpy_rad,
+            cfg.urdf_path,
+            cfg.base_link,
+            cfg.end_link,
+        )
         ep = target_T[:3, 3] - cur_T[:3, 3]
         er = _rotvec_error(cur_T[:3, :3], target_T[:3, :3])
         pos_err = float(np.linalg.norm(ep))
@@ -358,7 +354,15 @@ def solve_ik(
             return True, q, pos_err, rot_err
 
         e = np.concatenate([ep, cfg.orientation_weight * er])
-        J = W @ geometric_jacobian(q, cfg.tool_length_m, cfg.tool_tcp_xyz_m, cfg.tool_tcp_rpy_rad)
+        J = W @ geometric_jacobian(
+            q,
+            cfg.tool_length_m,
+            cfg.tool_tcp_xyz_m,
+            cfg.tool_tcp_rpy_rad,
+            cfg.urdf_path,
+            cfg.base_link,
+            cfg.end_link,
+        )
         JJt = J @ J.T + lam2 * np.eye(6)
         dq = J.T @ np.linalg.solve(JJt, e)
 
@@ -395,8 +399,19 @@ def _joint_motion(points: list[TrajectoryPoint]) -> float:
 
 def _collision_warnings(q: np.ndarray, cfg: IKConfig, index: int) -> list[str]:
     warnings = []
-    _, Ts = panda_fk(q, cfg.tool_length_m, cfg.tool_tcp_xyz_m, cfg.tool_tcp_rpy_rad)
-    min_z = min(float(T[2, 3]) for T in Ts[1:])
+    _, Ts = panda_fk(
+        q,
+        cfg.tool_length_m,
+        cfg.tool_tcp_xyz_m,
+        cfg.tool_tcp_rpy_rad,
+        cfg.urdf_path,
+        cfg.base_link,
+        cfg.end_link,
+    )
+    # Skip base/flange-origin helper frames that are part of the robot mounting,
+    # not arm geometry that should clear the print bed.
+    sampled_frames = Ts[2:] if len(Ts) > 2 else Ts[1:]
+    min_z = min(float(T[2, 3]) for T in sampled_frames)
     if min_z < cfg.bed_z_m + cfg.min_clearance_m:
         warnings.append(
             f"waypoint {index}: link sample below bed clearance "
@@ -420,7 +435,7 @@ def solve_path_ik(path: PathPrep, cfg: IKConfig | None = None) -> RobotTrajector
         i = local_i * stride
         reach = float(np.linalg.norm(wp.p))
         if reach > cfg.max_reach_m + 0.08:
-            warnings.append(f"waypoint {i}: target reach {reach:.3f} m is outside nominal Panda range")
+            warnings.append(f"waypoint {i}: target reach {reach:.3f} m is outside nominal robot range")
 
         candidates: list[tuple[float, bool, np.ndarray, float, float, float]] = []
         yaws = _yaw_candidates(cfg.yaw_samples) if wp.yaw_free else [wp.yaw]
@@ -486,3 +501,6 @@ class FrankaPandaPlanner(RobotPlanner):
 
     def solve(self, path: PathPrep) -> RobotTrajectory:
         return solve_path_ik(path, self.config)
+
+
+URDFRobotPlanner = FrankaPandaPlanner

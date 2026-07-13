@@ -1,4 +1,4 @@
-"""End-to-end runner for Cura G-code to Franka/Isaac trajectory export."""
+"""End-to-end runner for Cura G-code to robot/Isaac trajectory export."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from robotic_printing_platform.config import DEFAULT_CONFIG_PATH, load_planner_c
 from robotic_printing_platform.exporters.isaac import export_isaac_bundle
 from robotic_printing_platform.gcode import parse_gcode
 from robotic_printing_platform.path_planning import LayeredPathPlanner
-from robotic_printing_platform.robots import FrankaPandaPlanner
+from robotic_printing_platform.robots import URDFRobotPlanner
 from visualize_pipeline import write_all_plots
 
 
@@ -69,8 +69,8 @@ def run(
     traj = None
     bundle = {}
     if not skip_ik:
-        print("=== Stage 3: Franka IK / yaw optimization ===")
-        robot_planner = FrankaPandaPlanner(
+        print("=== Stage 3: robot IK / yaw optimization ===")
+        robot_planner = URDFRobotPlanner(
             cfg.make_ik_config(ik_stride=ik_stride, max_waypoints=max_ik_waypoints)
         )
         traj = robot_planner.solve(pp)
