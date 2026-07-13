@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 360" width="920" height="360">
-<rect width="100%" height="100%" fill="#fbfbfb" />
-<text x="20" y="26" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#202428">Optimized Franka Joint Motion</text>
-<line x1="30" y1="324" x2="890" y2="324" stroke="#d6d9dd" />
-<polyline points="30.0,324.0 60.7,324.0 91.4,324.0 122.1,324.0 152.9,202.2 183.6,324.0 214.3,324.0 245.0,324.0 275.7,324.0 306.4,324.0 337.1,324.0 367.9,324.0 398.6,324.0 429.3,165.3 460.0,324.0 490.7,324.0 521.4,324.0 552.1,324.0 582.9,324.0 613.6,324.0 644.3,205.4 675.0,324.0 705.7,324.0 736.4,201.9 767.1,60.5 797.9,56.3 828.6,53.6 859.3,50.0 890.0,324.0" fill="none" stroke="#2ca02c" stroke-width="1.5" stroke-opacity="0.95" stroke-linecap="round" stroke-linejoin="round" />
-<text x="20" y="346" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#555">per-step joint displacement, max 0.0649 rad</text>
-</svg>
