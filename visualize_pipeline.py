@@ -125,7 +125,7 @@ def plot_joint_trajectory(traj: RobotTrajectory, path: str | Path) -> Path:
     Q = traj.q_array()
     if len(Q) < 2:
         body = '<text x="20" y="80" font-family="Segoe UI, Arial, sans-serif" font-size="13">No joint trajectory available.</text>'
-        return _write_svg(path, "Franka Joint Motion", body, width, height)
+        return _write_svg(path, f"{traj.config.robot_model} Joint Motion", body, width, height)
 
     dq = np.linalg.norm(np.diff(Q, axis=0), axis=1)
     maxv = max(float(np.max(dq)), 1e-9)
@@ -140,7 +140,7 @@ def plot_joint_trajectory(traj: RobotTrajectory, path: str | Path) -> Path:
     for failed in traj.report.failed_indices:
         x = 30 + failed / max(1, traj.report.attempted - 1) * (width - 60)
         body.append(f'<line x1="{x:.1f}" y1="42" x2="{x:.1f}" y2="{height - 36}" stroke="#d62728" stroke-opacity="0.5" />')
-    return _write_svg(path, "Optimized Franka Joint Motion", "\n".join(body), width, height)
+    return _write_svg(path, f"Optimized {traj.config.robot_model} Joint Motion", "\n".join(body), width, height)
 
 
 def write_all_plots(

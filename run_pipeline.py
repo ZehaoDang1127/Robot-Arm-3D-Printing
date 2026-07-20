@@ -9,11 +9,18 @@ from robotic_printing_platform.config import DEFAULT_CONFIG_PATH, load_planner_c
 from robotic_printing_platform.exporters.isaac import export_isaac_bundle
 from robotic_printing_platform.gcode import parse_gcode
 from robotic_printing_platform.path_planning import LayeredPathPlanner
-from robotic_printing_platform.robots import URDFRobotPlanner
+from robotic_printing_platform.robots.generic import URDFRobotPlanner
+from robotic_printing_platform.trajectory import retime_trajectory
+from robotic_printing_platform.validation import validate_trajectory
+from robotic_printing_platform.validation import sweep_position_tolerances
 from visualize_pipeline import write_all_plots
 
 
 DEFAULT_GCODE = "strong_universal_wall_hook_vcd.gcode"
+ROBOT_CONFIG_DIRS = {
+    "panda": "robotic_printing_platform/robots/robot_configs/franka_panda",
+    "ur5": "robotic_printing_platform/robots/robot_configs/ur5",
+}
 
 
 def run(
@@ -31,12 +38,17 @@ def run(
     skip_ik: bool = False,
     ik_stride: int | None = None,
     max_ik_waypoints: int | None = None,
+    ik_selection_mode: str | None = None,
+    position_tolerance_sweep_mm: list[float] | None = None,
     all_layers: bool = False,
+    robot: str = "both",
 ):
     path = Path(path)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     cfg = load_planner_config(config_path)
+    if robot not in {"panda", "ur5", "both", "config"}:
+        raise ValueError("robot must be one of: panda, ur5, both, config")
 
     bed_x = cfg.bed.center_xyz_m[0] if bed_x_m is None else bed_x_m
     bed_y = cfg.bed.center_xyz_m[1] if bed_y_m is None else bed_y_m
@@ -66,33 +78,82 @@ def run(
     print(pp.summary())
     print()
 
-    traj = None
-    bundle = {}
-    if not skip_ik:
-        print("=== Stage 3: robot IK / yaw optimization ===")
-        robot_planner = URDFRobotPlanner(
-            cfg.make_ik_config(ik_stride=ik_stride, max_waypoints=max_ik_waypoints)
+    selected_robots = ("panda", "ur5") if robot == "both" else (robot,)
+    trajectories = {}
+    bundles = {}
+    plots = {}
+
+    for robot_key in selected_robots:
+        robot_cfg = (
+            cfg
+            if robot_key == "config"
+            else load_planner_config(config_path, robot_config_dir=ROBOT_CONFIG_DIRS[robot_key])
         )
-        traj = robot_planner.solve(pp)
-        print(traj.report.summary())
-        if traj.report.warnings:
-            print("first warnings:")
-            for warning in traj.report.warnings[:5]:
-                print(f"  - {warning}")
-        print()
+        output_name = "panda" if robot_key == "panda" else robot_cfg.robot.model
+        robot_out = out / output_name
+        traj = None
 
-        print("=== Stage 4: export ===")
-        bundle = export_isaac_bundle(traj, out)
-        for name, file_path in bundle.items():
+        print(f"=== {robot_cfg.robot.model}: output {robot_out} ===")
+        if position_tolerance_sweep_mm:
+            sweep_cfg = robot_cfg.make_ik_config(
+                ik_stride=ik_stride,
+                max_waypoints=max_ik_waypoints,
+            )
+            if ik_selection_mode is not None:
+                sweep_cfg.ik_selection_mode = ik_selection_mode
+            tolerance_sweep = sweep_position_tolerances(
+                pp,
+                sweep_cfg,
+                position_tolerance_sweep_mm,
+            )
+            tolerance_sweep_path = tolerance_sweep.write_json(robot_out / "ik_tolerance_sweep.json")
+            print(tolerance_sweep.summary())
+            print(f"tolerance sweep: {tolerance_sweep_path}")
+            print()
+
+        if not skip_ik:
+            print("=== Stage 3: robot IK / yaw optimization ===")
+            robot_planner = URDFRobotPlanner(
+                robot_cfg.make_ik_config(ik_stride=ik_stride, max_waypoints=max_ik_waypoints)
+            )
+            if ik_selection_mode is not None:
+                robot_planner.config.ik_selection_mode = ik_selection_mode
+            traj = robot_planner.solve(pp)
+            traj = retime_trajectory(
+                traj,
+                robot_cfg.robot.joint_velocity_limits_rad_s,
+                robot_cfg.robot.joint_acceleration_limits_rad_s2,
+            )
+            trajectories[robot_cfg.robot.model] = traj
+            print(traj.report.summary())
+            if traj.report.warnings:
+                print("first warnings:")
+                for warning in traj.report.warnings[:5]:
+                    print(f"  - {warning}")
+            print()
+
+            validation = validate_trajectory(traj)
+            validation_path = validation.write_json(robot_out / "trajectory_validation_report.json")
+            print("=== Trajectory validation ===")
+            print(validation.summary())
+            print(f"validation report: {validation_path}")
+            print()
+
+            print("=== Stage 4: export ===")
+            bundle = export_isaac_bundle(traj, robot_out)
+            bundle["validation_report"] = validation_path
+            bundles[robot_cfg.robot.model] = bundle
+            for name, file_path in bundle.items():
+                print(f"{name}: {file_path}")
+            print()
+
+        print("=== Visualization ===")
+        robot_plots = write_all_plots(res, pp, traj, robot_out)
+        plots[robot_cfg.robot.model] = robot_plots
+        for name, file_path in robot_plots.items():
             print(f"{name}: {file_path}")
-        print()
 
-    print("=== Visualization ===")
-    plots = write_all_plots(res, pp, traj, out)
-    for name, file_path in plots.items():
-        print(f"{name}: {file_path}")
-
-    return res, pp, traj, bundle, plots
+    return res, pp, trajectories, bundles, plots
 
 
 def _parse_args() -> argparse.Namespace:
@@ -111,6 +172,26 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-ik", action="store_true", help="only parse, prepare, and visualize waypoints")
     parser.add_argument("--ik-stride", type=int, default=None, help="override solve every Nth waypoint")
     parser.add_argument("--max-ik-waypoints", type=int, default=None, help="cap IK waypoints for smoke tests")
+    parser.add_argument(
+        "--ik-selection-mode",
+        choices=["greedy", "global_dp"],
+        default=None,
+        help="override the configured local or global yaw/IK selection mode",
+    )
+    parser.add_argument(
+        "--position-tolerance-sweep-mm",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="MM",
+        help="run an IK convergence sweep, e.g. 8 5 3 2 1",
+    )
+    parser.add_argument(
+        "--robot",
+        choices=["panda", "ur5", "both", "config"],
+        default="both",
+        help="robot package(s) to run; both writes separate panda/ and ur5/ outputs",
+    )
     return parser.parse_args()
 
 
@@ -130,5 +211,8 @@ if __name__ == "__main__":
         skip_ik=args.skip_ik,
         ik_stride=args.ik_stride,
         max_ik_waypoints=args.max_ik_waypoints,
+        ik_selection_mode=args.ik_selection_mode,
+        position_tolerance_sweep_mm=args.position_tolerance_sweep_mm,
         all_layers=args.all_layers,
+        robot=args.robot,
     )

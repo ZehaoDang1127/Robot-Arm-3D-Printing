@@ -18,9 +18,8 @@ solver can evolve independently.
   module when you want a different ordering, smoothing, non-planar planning, or
   nozzle-normal strategy.
 - `robotic_printing_platform/robots/` contains the `RobotPlanner` interface,
-  URDF kinematics helpers, robot configuration folders, and the default
-  URDF-backed planner. The default robot package is
-  `robotic_printing_platform/robots/robot_configs/franka_panda/`.
+  URDF kinematics helpers, and swappable robot packages. Built-in packages are
+  `robot_configs/franka_panda/` and `robot_configs/ur5/`.
 - `robotic_printing_platform/exporters/` writes simulator/runtime artifacts.
 
 Top-level scripts stay small: `run_pipeline.py` runs the workflow and
@@ -47,10 +46,17 @@ Run parsing, path preparation, and visualization:
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --lo 0 --hi 1 --skip-ik --output-dir outputs
 ```
 
-Run a small IK/export smoke test:
+Run separate Panda and UR5 IK/export smoke tests (the default):
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --lo 0 --hi 1 --max-seg-len-mm 20 --simplify-deg 2 --max-ik-waypoints 30 --output-dir outputs
+```
+
+Run only one robot package:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot panda --output-dir outputs
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5 --output-dir outputs
 ```
 
 Use a different configuration:
@@ -106,13 +112,25 @@ planar downward nozzle axis.
 
 ## Changing Robot
 
-Implement `robotic_printing_platform.robots.base.RobotPlanner`. The current
-planner loads its arm geometry from the folder named by
+The common URDF planner is available from
+`robotic_printing_platform.robots.generic`:
+
+```python
+from robotic_printing_platform.robots.generic import URDFIKConfig, URDFRobotPlanner
+```
+
+`URDFIKConfig` contains the URDF, base/end links, joint metadata and limits,
+TCP, bed/collision settings, and IK/global-optimization settings. The Panda
+and UR5 modules are thin robot-specific defaults layered over this generic
+planner. To add another serial arm, provide its configuration folder and
+construct a `URDFIKConfig`; implement `RobotPlanner` only when replacing the
+planning algorithm itself. The common planner loads its arm geometry from the folder named by
 `planner_config.json -> robot.config_dir`, wraps the NumPy URDF IK solver, and
-exports joint trajectories. To swap from Franka Panda to UR5 or another serial
-arm, copy `robotic_printing_platform/robots/robot_configs/franka_panda/`,
-replace `robot.urdf`, edit `robot_config.json`, then point `robot.config_dir`
-at the new folder.
+exports joint trajectories. To add another serial arm, copy one of the folders
+under `robotic_printing_platform/robots/robot_configs/`, replace `robot.urdf`,
+edit `robot_config.json`, then point `robot.config_dir` at the new folder. The
+built-in UR5 package uses Universal Robots' published 850 mm reach and
+six-joint planning chain; its sources are recorded in the package README.
 
 Important limitation: the included Franka IK is a lightweight NumPy
 implementation for planning and simulation export. For real printing, calibrate
@@ -121,7 +139,8 @@ sending anything to hardware.
 
 ## Outputs
 
-The pipeline writes files under `--output-dir`.
+The pipeline writes one directory per selected robot under `--output-dir`.
+With the default `--robot both`, files are separated into `panda/` and `ur5/`.
 
 - `gcode_path.svg`: top view of parsed print and travel moves.
 - `robot_waypoints.svg`: top view after placement in robot base coordinates.

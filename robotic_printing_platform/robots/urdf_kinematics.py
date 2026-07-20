@@ -169,7 +169,10 @@ class URDFKinematicChain:
             jacobian = weights @ self.jacobian(q, tcp_transform)
             jj_t = jacobian @ jacobian.T + lam2 * np.eye(6)
             dq = jacobian.T @ np.linalg.solve(jj_t, error)
-            dq += nullspace_weight * (home - q)
+            # Keep the posture bias from perturbing the Cartesian task for
+            # non-redundant chains such as the six-axis UR5.
+            jacobian_pinv = jacobian.T @ np.linalg.solve(jj_t, np.eye(6))
+            dq += nullspace_weight * (np.eye(len(q)) - jacobian_pinv @ jacobian) @ (home - q)
             step_norm = float(np.linalg.norm(dq, ord=np.inf))
             if step_norm > max_joint_step_rad:
                 dq *= max_joint_step_rad / step_norm

@@ -75,11 +75,20 @@ class PathPrep:
     waypoints: list[Waypoint]
     T_base_bed: np.ndarray
     layers: tuple[int, int]
+    source_extrusion_mm: float
+    waypoint_extrusion_mm: float
 
     def positions(self) -> np.ndarray:
         return np.array([w.p for w in self.waypoints])
 
     def summary(self) -> str:
+        if not self.waypoints:
+            return (
+                f"layers {self.layers[0]}..{self.layers[1]-1}\n"
+                "waypoints      : 0\n"
+                "deposition runs: 0\n"
+                "extrusion (mm) : source=0.000000, waypoint=0.000000"
+            )
         P = self.positions()
         prints = [w for w in self.waypoints if w.is_print]
         n_runs = len({w.seg_id for w in prints})
@@ -92,8 +101,28 @@ class PathPrep:
             f"base-frame XYZ : X[{P[:,0].min():.3f}, {P[:,0].max():.3f}]  "
             f"Y[{P[:,1].min():.3f}, {P[:,1].max():.3f}]  "
             f"Z[{P[:,2].min():.3f}, {P[:,2].max():.3f}] m\n"
-            f"reach from base: {reach.min():.3f} .. {reach.max():.3f} m"
+            f"reach from base: {reach.min():.3f} .. {reach.max():.3f} m\n"
+            f"extrusion (mm) : source={self.source_extrusion_mm:.6f}, "
+            f"waypoint={self.waypoint_extrusion_mm:.6f}"
         )
+
+    def layer_statistics(self) -> dict[int, dict[str, float | int]]:
+        """Return waypoint count and deposited volume for every source layer.
+
+        Layer metadata comes directly from the G-code move that produced each
+        waypoint, so this remains meaningful for ``--all-layers`` exports.
+        """
+        stats: dict[int, dict[str, float | int]] = {}
+        for waypoint in self.waypoints:
+            layer = stats.setdefault(
+                waypoint.layer,
+                {"waypoints": 0, "print_waypoints": 0, "extrusion_volume_mm3": 0.0},
+            )
+            layer["waypoints"] += 1
+            if waypoint.is_print:
+                layer["print_waypoints"] += 1
+                layer["extrusion_volume_mm3"] += waypoint.extrusion_volume_mm3
+        return stats
 
 
 # ----------------------------------------------------------------------------
@@ -117,15 +146,21 @@ def _frame_from_axis_yaw(z_axis: np.ndarray, yaw: float) -> np.ndarray:
 # ----------------------------------------------------------------------------
 # step 1 — clean & densify  (operates in printer-frame mm)
 # ----------------------------------------------------------------------------
-def _runs_from_moves(res: ParseResult, lo: int, hi: int):
-    """Split the selected layers into (kind, polyline) runs.
+PathVertex = tuple[np.ndarray, float, int, float]
 
-    kind is 'print' or 'travel'. polyline is a list of (xyz_mm, de) where de is
-    the extrusion deposited arriving at that vertex (0 for the first vertex of
-    a run and for all travel vertices).
+
+def _runs_from_moves(res: ParseResult, lo: int, hi: int):
+    """Split the selected layers into (kind, layer, polyline) runs.
+
+    kind is 'print' or 'travel'.  A polyline vertex is ``(xyz_mm, de, layer,
+    feed_m_s)`` where ``de`` is deposited arriving at that vertex.  The anchor
+    at the start of a run has zero extrusion and inherits the first segment's
+    layer/feedrate.  This makes the polyline self-contained while retaining
+    the source metadata of every G-code segment.
     """
     runs = []
     cur_kind = None
+    cur_layer = None
     cur = None
     prev_xyz = None
     for s, e, mv in res.iter_segments():
@@ -133,21 +168,27 @@ def _runs_from_moves(res: ParseResult, lo: int, hi: int):
             prev_xyz = e
             continue
         kind = "print" if mv.is_print else "travel"
-        if kind != cur_kind:
+        if kind != cur_kind or mv.layer != cur_layer:
             if cur:
-                runs.append((cur_kind, cur))
+                runs.append((cur_kind, cur_layer, cur))
             # start new run anchored at the segment start
-            cur = [(np.array(s, float), 0.0)]
+            cur = [(np.array(s, float), 0.0, mv.layer, mv.feed_m_s())]
             cur_kind = kind
-        cur.append((np.array(e, float), mv.de))
+            cur_layer = mv.layer
+        cur.append((np.array(e, float), mv.de, mv.layer, mv.feed_m_s()))
         prev_xyz = e
     if cur:
-        runs.append((cur_kind, cur))
+        runs.append((cur_kind, cur_layer, cur))
     return runs
 
 
-def _simplify_collinear(poly, angle_tol_deg: float):
-    """Remove vertices whose turn angle is below tol; accumulate their de."""
+def _simplify_collinear(poly: list[PathVertex], angle_tol_deg: float) -> list[PathVertex]:
+    """Remove near-collinear vertices without changing extrusion or feed.
+
+    A vertex is retained whenever its incoming and outgoing feedrates differ.
+    Otherwise simplifying it would erase a source speed change and make the
+    resulting robot trajectory falsely appear to have a uniform print speed.
+    """
     if len(poly) <= 2 or angle_tol_deg <= 0:
         return poly
     tol = math.radians(angle_tol_deg)
@@ -157,31 +198,51 @@ def _simplify_collinear(poly, angle_tol_deg: float):
         a = out[-1][0]; b = poly[i][0]; c = poly[i + 1][0]
         v1 = _unit(b - a); v2 = _unit(c - b)
         ang = math.acos(max(-1.0, min(1.0, float(np.dot(v1, v2)))))
-        if ang < tol:                      # near-straight: drop b, carry its de
+        same_feed = math.isclose(poly[i][3], poly[i + 1][3], rel_tol=1e-12, abs_tol=1e-12)
+        if ang < tol and same_feed:        # near-straight: drop b, carry its de
             carry += poly[i][1]
         else:
-            out.append((b, poly[i][1] + carry)); carry = 0.0
+            out.append((b, poly[i][1] + carry, poly[i][2], poly[i][3])); carry = 0.0
     last = poly[-1]
-    out.append((last[0], last[1] + carry))
+    out.append((last[0], last[1] + carry, last[2], last[3]))
     return out
 
 
-def _densify(poly, max_seg_len_mm: float):
-    """Subdivide segments > max length, splitting de proportionally.
+def _densify(poly: list[PathVertex], max_seg_len_mm: float) -> list[PathVertex]:
+    """Subdivide segments, splitting extrusion while retaining source metadata.
 
-    Returns list of (xyz_mm, de). First vertex carries de=0.
+    Each inserted vertex inherits the layer and feedrate of the G-code segment
+    it subdivides.  First vertex carries de=0.
     """
-    out = [(poly[0][0], 0.0)]
-    for (a, _), (b, de) in zip(poly, poly[1:]):
+    out = [(poly[0][0], 0.0, poly[0][2], poly[0][3])]
+    for (a, _, _, _), (b, de, layer, feed_m_s) in zip(poly, poly[1:]):
         L = float(np.linalg.norm(b - a))
         if L <= 1e-9:                      # zero-length prime/dwell
-            out.append((b, de))            # keep as a single dwell point
+            out.append((b, de, layer, feed_m_s))  # keep as a single dwell point
             continue
         n = max(1, int(math.ceil(L / max_seg_len_mm)))
         for k in range(1, n + 1):
             t = k / n
-            out.append((a + t * (b - a), de / n))
+            out.append((a + t * (b - a), de / n, layer, feed_m_s))
     return out
+
+
+def _source_extrusion_mm(res: ParseResult, lo: int, hi: int) -> float:
+    """Total positive extrusion from source segments included in this path."""
+    return sum(
+        mv.de
+        for _, _, mv in res.iter_segments()
+        if lo <= mv.layer < hi and mv.is_print
+    )
+
+
+def _validate_extrusion_conservation(source_mm: float, waypoint_mm: float) -> None:
+    """Fail fast if simplification or densification changed deposited material."""
+    if not math.isclose(source_mm, waypoint_mm, rel_tol=1e-10, abs_tol=1e-9):
+        raise ValueError(
+            "extrusion conservation failed: "
+            f"source={source_mm:.12g} mm, waypoints={waypoint_mm:.12g} mm"
+        )
 
 
 # ----------------------------------------------------------------------------
@@ -211,8 +272,17 @@ def build_waypoints(
     lo, hi = layers
     runs = _runs_from_moves(res, lo, hi)
 
+    if not runs:
+        return PathPrep(
+            waypoints=[],
+            T_base_bed=make_bed_transform(bed_center_xy_m, bed_z_m),
+            layers=(lo, hi),
+            source_extrusion_mm=0.0,
+            waypoint_extrusion_mm=0.0,
+        )
+
     # footprint centre (mm) over the selected layers, for re-centering
-    allpts = np.array([v[0] for _, poly in runs for v in poly])
+    allpts = np.array([v[0] for _, _, poly in runs for v in poly])
     cx, cy = allpts[:, 0].mean(), allpts[:, 1].mean()
 
     T = make_bed_transform(bed_center_xy_m, bed_z_m)
@@ -220,13 +290,11 @@ def build_waypoints(
 
     waypoints: list[Waypoint] = []
     seg = 0
-    for kind, poly in runs:
+    for kind, layer, poly in runs:
         is_print = kind == "print"
         poly = _simplify_collinear(poly, simplify_deg) if is_print else poly
         dense = _densify(poly, max_seg_len_mm)
-        # representative layer for this run (mode of the source layer is fine;
-        # all vertices in a run share a layer for planar prints)
-        for xyz_mm, de in dense:
+        for xyz_mm, de, source_layer, source_feed_m_s in dense:
             # mm -> m, recentre, then bed transform
             local = np.array([(xyz_mm[0] - cx) / 1000.0,
                               (xyz_mm[1] - cy) / 1000.0,
@@ -238,25 +306,25 @@ def build_waypoints(
             extrusion = apply_material_profile(de, material_profile)
             waypoints.append(Waypoint(
                 p=p, nozzle_axis=axis, yaw=0.0, yaw_free=True,
-                is_print=is_print, layer=lo, seg_id=seg,
-                feed_m_s=0.0, de=de,
+                is_print=is_print, layer=source_layer, seg_id=seg,
+                feed_m_s=source_feed_m_s, de=de,
                 material=extrusion.material,
                 extrusion_volume_mm3=extrusion.volume_mm3,
                 extrusion_mass_g=extrusion.mass_g,
             ))
         seg += 1
 
-    # carry feedrate onto print waypoints from the source moves (approx: use a
-    # constant print feed; Stage 4 re-timing refines this). We pull the modal
-    # print feed seen in the slice.
-    print_feeds = [m.feed_m_s() for m in res.moves
-                   if m.is_print and lo <= m.layer < hi and m.f > 0]
-    fps = float(np.median(print_feeds)) if print_feeds else 0.0
-    for w in waypoints:
-        if w.is_print:
-            w.feed_m_s = fps
+    source_extrusion_mm = _source_extrusion_mm(res, lo, hi)
+    waypoint_extrusion_mm = sum(w.de for w in waypoints if w.is_print)
+    _validate_extrusion_conservation(source_extrusion_mm, waypoint_extrusion_mm)
 
-    return PathPrep(waypoints=waypoints, T_base_bed=T, layers=(lo, hi))
+    return PathPrep(
+        waypoints=waypoints,
+        T_base_bed=T,
+        layers=(lo, hi),
+        source_extrusion_mm=source_extrusion_mm,
+        waypoint_extrusion_mm=waypoint_extrusion_mm,
+    )
 
 
 @dataclass(frozen=True)

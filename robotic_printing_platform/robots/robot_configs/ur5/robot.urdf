@@ -1,0 +1,117 @@
+<?xml version="1.0"?>
+<robot name="universal_robots_ur5_planning">
+  <!--
+    Minimal UR5 kinematic URDF for this platform's dependency-light planner.
+
+    It encodes the original UR5 standard-DH chain, using for each joint:
+      T_i = Tz(d_i) Rz(q_i) Tx(a_i) Rx(alpha_i)
+
+    Dimensions (m):
+      d = [0.089159, 0, 0, 0.10915, 0.09465, 0.0823]
+      a = [0, -0.425, -0.39225, 0, 0, 0]
+      alpha = [pi/2, 0, 0, pi/2, -pi/2, 0]
+
+    These parameters match the UR5 description distributed by Universal
+    Robots. Geometry is intentionally omitted: this file is for FK/IK and
+    planning, not visual rendering.
+  -->
+
+  <link name="base_link"/>
+  <link name="shoulder_pan_rot"/>
+  <link name="shoulder_link"/>
+  <link name="shoulder_lift_rot"/>
+  <link name="upper_arm_link"/>
+  <link name="elbow_rot"/>
+  <link name="forearm_link"/>
+  <link name="wrist_1_rot"/>
+  <link name="wrist_1_link"/>
+  <link name="wrist_2_rot"/>
+  <link name="wrist_2_link"/>
+  <link name="wrist_3_rot"/>
+  <link name="wrist_3_link"/>
+  <link name="tool0"/>
+
+  <joint name="shoulder_pan_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder_pan_rot"/>
+    <origin xyz="0 0 0.089159" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.283185307179586" upper="6.283185307179586" effort="150" velocity="3.141592653589793"/>
+  </joint>
+  <joint name="shoulder_pan_fixed" type="fixed">
+    <parent link="shoulder_pan_rot"/>
+    <child link="shoulder_link"/>
+    <origin xyz="0 0 0" rpy="1.5707963267948966 0 0"/>
+  </joint>
+
+  <joint name="shoulder_lift_joint" type="revolute">
+    <parent link="shoulder_link"/>
+    <child link="shoulder_lift_rot"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.283185307179586" upper="6.283185307179586" effort="150" velocity="3.141592653589793"/>
+  </joint>
+  <joint name="shoulder_lift_fixed" type="fixed">
+    <parent link="shoulder_lift_rot"/>
+    <child link="upper_arm_link"/>
+    <origin xyz="-0.425 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="elbow_joint" type="revolute">
+    <parent link="upper_arm_link"/>
+    <child link="elbow_rot"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.283185307179586" upper="6.283185307179586" effort="150" velocity="3.141592653589793"/>
+  </joint>
+  <joint name="elbow_fixed" type="fixed">
+    <parent link="elbow_rot"/>
+    <child link="forearm_link"/>
+    <origin xyz="-0.39225 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="wrist_1_joint" type="revolute">
+    <parent link="forearm_link"/>
+    <child link="wrist_1_rot"/>
+    <origin xyz="0 0 0.10915" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.283185307179586" upper="6.283185307179586" effort="28" velocity="3.141592653589793"/>
+  </joint>
+  <joint name="wrist_1_fixed" type="fixed">
+    <parent link="wrist_1_rot"/>
+    <child link="wrist_1_link"/>
+    <origin xyz="0 0 0" rpy="1.5707963267948966 0 0"/>
+  </joint>
+
+  <joint name="wrist_2_joint" type="revolute">
+    <parent link="wrist_1_link"/>
+    <child link="wrist_2_rot"/>
+    <origin xyz="0 0 0.09465" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.283185307179586" upper="6.283185307179586" effort="28" velocity="3.141592653589793"/>
+  </joint>
+  <joint name="wrist_2_fixed" type="fixed">
+    <parent link="wrist_2_rot"/>
+    <child link="wrist_2_link"/>
+    <origin xyz="0 0 0" rpy="-1.5707963267948966 0 0"/>
+  </joint>
+
+  <joint name="wrist_3_joint" type="revolute">
+    <parent link="wrist_2_link"/>
+    <child link="wrist_3_rot"/>
+    <origin xyz="0 0 0.0823" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.283185307179586" upper="6.283185307179586" effort="28" velocity="3.141592653589793"/>
+  </joint>
+  <joint name="wrist_3_fixed" type="fixed">
+    <parent link="wrist_3_rot"/>
+    <child link="wrist_3_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="flange_to_tool0" type="fixed">
+    <parent link="wrist_3_link"/>
+    <child link="tool0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+</robot>

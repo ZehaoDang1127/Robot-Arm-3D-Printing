@@ -14,10 +14,10 @@ from robotic_printing_platform.robots.franka_panda import (
     DEFAULT_PANDA_JOINT_NAMES,
     DEFAULT_PANDA_URDF_PATH,
     DEFAULT_ROBOT_CONFIG_DIR,
-    IKConfig,
     PANDA_HOME,
     PANDA_JOINT_LIMITS,
 )
+from robotic_printing_platform.robots.generic import URDFIKConfig
 
 
 DEFAULT_CONFIG_PATH = Path("planner_config.json")
@@ -34,7 +34,11 @@ class RobotConfig:
     joint_names: list[str]
     home_q_rad: np.ndarray
     joint_limits_rad: np.ndarray
+    joint_velocity_limits_rad_s: np.ndarray
+    joint_acceleration_limits_rad_s2: np.ndarray
     max_reach_m: float
+    isaac_usd_path: str
+    collision_skip_frames: int
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,8 @@ class BedConfig:
     center_xyz_m: tuple[float, float, float]
     normal: tuple[float, float, float]
     min_clearance_m: float
+    half_extents_xy_m: tuple[float, float]
+    thickness_m: float
 
 
 @dataclass(frozen=True)
@@ -75,14 +81,14 @@ class PlannerConfig:
         *,
         ik_stride: int | None = None,
         max_waypoints: int | None = None,
-    ) -> IKConfig:
+    ) -> URDFIKConfig:
         ik = dict(self.ik)
         if ik_stride is not None:
             ik["ik_stride"] = ik_stride
         if max_waypoints is not None:
             ik["max_waypoints"] = max_waypoints
 
-        return IKConfig(
+        return URDFIKConfig(
             urdf_path=self.robot.urdf_path,
             base_link=self.robot.base_link,
             end_link=self.robot.end_link,
@@ -95,11 +101,24 @@ class PlannerConfig:
             nullspace_weight=float(ik.get("nullspace_weight", 0.015)),
             max_joint_step_rad=float(ik.get("max_joint_step_rad", 0.10)),
             yaw_samples=int(ik.get("yaw_samples", 13)),
+            ik_selection_mode=str(ik.get("ik_selection_mode", "global_dp")),
+            global_dp_motion_weight=float(ik.get("global_dp_motion_weight", 10.0)),
+            global_dp_smoothness_weight=float(ik.get("global_dp_smoothness_weight", 0.15)),
+            global_dp_ik_error_weight=float(ik.get("global_dp_ik_error_weight", 25.0)),
+            global_dp_singularity_weight=float(ik.get("global_dp_singularity_weight", 0.01)),
+            global_dp_collision_penalty=float(ik.get("global_dp_collision_penalty", 0.0)),
+            yaw_discontinuity_threshold_rad=float(ik.get("yaw_discontinuity_threshold_rad", np.pi / 2.0)),
             joint_limits=self.robot.joint_limits_rad.copy(),
             q_home=self.robot.home_q_rad.copy(),
             bed_z_m=self.bed.center_xyz_m[2],
+            bed_center_xy_m=(self.bed.center_xyz_m[0], self.bed.center_xyz_m[1]),
+            bed_half_extents_xy_m=self.bed.half_extents_xy_m,
+            bed_thickness_m=self.bed.thickness_m,
             min_clearance_m=self.bed.min_clearance_m,
             max_reach_m=self.robot.max_reach_m,
+            robot_model=self.robot.model,
+            isaac_usd_path=self.robot.isaac_usd_path,
+            collision_skip_frames=self.robot.collision_skip_frames,
             ik_stride=int(ik.get("ik_stride", 1)),
             max_waypoints=ik.get("max_waypoints"),
             tool_tcp_xyz_m=self.nozzle_tcp.flange_to_nozzle_xyz_m,
@@ -145,12 +164,19 @@ def _load_robot_folder_config(robot_data: dict[str, Any], config_base_dir: Path)
     return merged, config_dir
 
 
-def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig:
+def load_planner_config(
+    path: str | Path = DEFAULT_CONFIG_PATH,
+    *,
+    robot_config_dir: str | Path | None = None,
+) -> PlannerConfig:
     config_path = Path(path)
     data = json.loads(config_path.read_text(encoding="utf-8"))
     config_base_dir = config_path.parent.resolve()
 
-    robot_data, robot_config_dir = _load_robot_folder_config(data.get("robot", {}), config_base_dir)
+    selected_robot_data = dict(data.get("robot", {}))
+    if robot_config_dir is not None:
+        selected_robot_data["config_dir"] = str(robot_config_dir)
+    robot_data, resolved_robot_config_dir = _load_robot_folder_config(selected_robot_data, config_base_dir)
     bed_data = data.get("bed", {})
     nozzle_data = data.get("nozzle_tcp", {})
     material_data = data.get("material", {})
@@ -159,7 +185,7 @@ def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig
     robot = RobotConfig(
         model=str(robot_data.get("model", "franka_panda")),
         parameter_source=str(robot_data.get("parameter_source", "robot_config_folder")),
-        config_dir=str(robot_data.get("config_dir", robot_config_dir)),
+        config_dir=str(robot_data.get("config_dir", resolved_robot_config_dir)),
         urdf_path=str(robot_data.get("urdf_path", DEFAULT_PANDA_URDF_PATH)),
         base_link=str(robot_data.get("base_link", "panda_link0")),
         end_link=str(robot_data.get("end_link", "panda_link8")),
@@ -174,12 +200,28 @@ def load_planner_config(path: str | Path = DEFAULT_CONFIG_PATH) -> PlannerConfig
             (len(robot_data.get("joint_names", DEFAULT_PANDA_JOINT_NAMES)), 2),
             "robot.joint_limits_rad",
         ),
+        joint_velocity_limits_rad_s=_as_array(
+            robot_data.get("joint_velocity_limits_rad_s", [1.0] * len(robot_data.get("joint_names", DEFAULT_PANDA_JOINT_NAMES))),
+            (len(robot_data.get("joint_names", DEFAULT_PANDA_JOINT_NAMES)),),
+            "robot.joint_velocity_limits_rad_s",
+        ),
+        joint_acceleration_limits_rad_s2=_as_array(
+            robot_data.get("joint_acceleration_limits_rad_s2", [2.0] * len(robot_data.get("joint_names", DEFAULT_PANDA_JOINT_NAMES))),
+            (len(robot_data.get("joint_names", DEFAULT_PANDA_JOINT_NAMES)),),
+            "robot.joint_acceleration_limits_rad_s2",
+        ),
         max_reach_m=float(robot_data.get("max_reach_m", 0.855)),
+        isaac_usd_path=str(robot_data.get("isaac_usd_path", "/Isaac/Robots/Franka/franka.usd")),
+        collision_skip_frames=int(robot_data.get("collision_skip_frames", 2)),
     )
     bed = BedConfig(
         center_xyz_m=_as_float_tuple(bed_data.get("center_xyz_m", [0.45, 0.0, 0.10]), 3, "bed.center_xyz_m"),
         normal=_as_float_tuple(bed_data.get("normal", [0.0, 0.0, 1.0]), 3, "bed.normal"),
         min_clearance_m=float(bed_data.get("min_clearance_m", 0.006)),
+        half_extents_xy_m=_as_float_tuple(
+            bed_data.get("half_extents_xy_m", [0.15, 0.15]), 2, "bed.half_extents_xy_m"
+        ),
+        thickness_m=float(bed_data.get("thickness_m", 0.02)),
     )
     nozzle_tcp = NozzleTCPConfig(
         flange_to_nozzle_xyz_m=_as_float_tuple(
