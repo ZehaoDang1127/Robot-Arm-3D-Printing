@@ -41,7 +41,7 @@ def run(
     ik_selection_mode: str | None = None,
     position_tolerance_sweep_mm: list[float] | None = None,
     all_layers: bool = False,
-    robot: str = "both",
+    robot: str = "panda",
 ):
     path = Path(path)
     out = Path(output_dir)
@@ -189,7 +189,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--robot",
         choices=["panda", "ur5", "both", "config"],
-        default="both",
+        default="panda",
         help="robot package(s) to run; both writes separate panda/ and ur5/ outputs",
     )
     return parser.parse_args()

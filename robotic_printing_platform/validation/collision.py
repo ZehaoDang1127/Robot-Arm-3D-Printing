@@ -86,8 +86,24 @@ def point_box_distance_m(point_m: np.ndarray, box: AxisAlignedBox) -> float:
     return float(np.linalg.norm(delta))
 
 
-def capsule_box_distance_m(capsule: LinkCapsule, box: AxisAlignedBox, samples: int = 33) -> float:
-    """Conservative lightweight sampled segment-to-box distance minus radius."""
+def capsule_box_distance_m(
+    capsule: LinkCapsule,
+    box: AxisAlignedBox,
+    samples: int | None = None,
+    *,
+    max_sample_spacing_m: float = 0.005,
+) -> float:
+    """Sample a capsule centerline against a box and subtract its radius.
+
+    The default resolution scales with link length, preventing a long link from
+    retaining the old fixed 33-point sampling density.  This remains a warning
+    heuristic rather than a conservative continuous collision proof.
+    """
+    if max_sample_spacing_m <= 0.0:
+        raise ValueError("max_sample_spacing_m must be greater than zero")
+    if samples is None:
+        length_m = float(np.linalg.norm(capsule.end_m - capsule.start_m))
+        samples = max(33, int(np.ceil(length_m / max_sample_spacing_m)) + 1)
     if samples < 2:
         raise ValueError("samples must be at least two")
     points = np.linspace(capsule.start_m, capsule.end_m, samples)

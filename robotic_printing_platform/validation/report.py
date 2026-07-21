@@ -39,6 +39,7 @@ class TrajectoryValidationReport:
     collision_warnings: list[str]
     warnings: list[str]
     estimated_print_time_s: float
+    timing_is_preview: bool
     extrusion_volume_mm3: float
     jacobian_sample_stride: int
 
@@ -74,7 +75,8 @@ class TrajectoryValidationReport:
             f"min Jacobian manipulability: {manipulability}\n"
             f"min Jacobian singular val.: {singularity}\n"
             f"collision warnings         : {len(self.collision_warnings)}\n"
-            f"estimated print time (s)  : {self.estimated_print_time_s:.6g}\n"
+            f"estimated print time (s)  : {self.estimated_print_time_s:.6g}"
+            f"{' (preview only)' if self.timing_is_preview else ''}\n"
             f"extrusion volume (mm^3)   : {self.extrusion_volume_mm3:.6g}"
         )
 
@@ -114,6 +116,18 @@ def _trajectory_derivatives(trajectory: RobotTrajectory, field_name: str) -> np.
     if result.shape != q.shape:
         raise ValueError(f"{field_name} shape does not match trajectory joint vectors")
     return result
+
+
+def _segment_velocities(trajectory: RobotTrajectory) -> np.ndarray:
+    """Recover average joint velocity for every geometric trajectory segment."""
+    if len(trajectory.points) < 2:
+        return np.empty((0, 0), dtype=float)
+    q = np.asarray([point.q for point in trajectory.points], dtype=float)
+    times = np.asarray([point.time_from_start_s for point in trajectory.points], dtype=float)
+    durations = np.diff(times)
+    if np.any(durations <= 0.0):
+        raise ValueError("time_from_start_s must increase between trajectory points")
+    return np.diff(q, axis=0) / durations[:, None]
 
 
 def _joint_limit_margin(trajectory: RobotTrajectory) -> float | None:
@@ -191,15 +205,17 @@ def validate_trajectory(
     position_errors = np.asarray([point.pos_error_m for point in points], dtype=float)
     rotation_errors = np.asarray([point.rot_error_rad for point in points], dtype=float)
     velocities = _trajectory_derivatives(trajectory, "joint_velocity_rad_s")
+    segment_velocities = _segment_velocities(trajectory)
     accelerations = _trajectory_derivatives(trajectory, "joint_acceleration_rad_s2")
 
     steps = np.diff(q, axis=0) if len(points) >= 2 else np.empty((0, q.shape[1]))
     maximum_step = float(np.max(np.abs(steps))) if steps.size else 0.0
     total_motion = float(np.linalg.norm(steps, axis=1).sum()) if steps.size else 0.0
-    maximum_velocity = float(np.max(np.abs(velocities))) if velocities.size else 0.0
+    velocity_samples = np.vstack((velocities, segment_velocities)) if segment_velocities.size else velocities
+    maximum_velocity = float(np.max(np.abs(velocity_samples))) if velocity_samples.size else 0.0
     maximum_acceleration = float(np.max(np.abs(accelerations))) if accelerations.size else 0.0
     velocity_violations = _derivative_violation_count(
-        velocities,
+        velocity_samples,
         np.asarray(trajectory.joint_velocity_limits_rad_s, dtype=float),
         "joint_velocity_limits_rad_s",
     )
@@ -217,7 +233,7 @@ def validate_trajectory(
         if "collision" in warning.lower() or "clearance" in warning.lower()
     ]
     ik_success_rate = (
-        float(trajectory.report.solved / trajectory.report.attempted)
+        float(trajectory.report.successful / trajectory.report.attempted)
         if trajectory.report.attempted
         else 0.0
     )
@@ -244,6 +260,7 @@ def validate_trajectory(
         collision_warnings=collision_warnings,
         warnings=list(trajectory.report.warnings),
         estimated_print_time_s=estimated_time,
+        timing_is_preview=trajectory.timing_is_preview,
         extrusion_volume_mm3=extrusion_volume,
         jacobian_sample_stride=jacobian_sample_stride,
     )

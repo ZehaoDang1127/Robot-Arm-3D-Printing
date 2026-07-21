@@ -48,6 +48,17 @@ class CapsuleCollisionTests(unittest.TestCase):
         box = AxisAlignedBox(np.array([0.4, -0.1, 0.8]), np.array([0.6, 0.1, 0.9]))
         self.assertAlmostEqual(capsule_box_distance_m(capsule, box), 0.0)
 
+    def test_capsule_box_distance_adapts_sampling_to_link_length(self):
+        capsule = LinkCapsule("long_link", np.zeros(3), np.array([1.0, 0.0, 0.0]), 0.01)
+        box = AxisAlignedBox(np.array([0.5, 0.1, 0.0]), np.array([0.6, 0.2, 0.1]))
+
+        with self.assertRaises(ValueError):
+            capsule_box_distance_m(capsule, box, max_sample_spacing_m=0.0)
+        self.assertAlmostEqual(
+            capsule_box_distance_m(capsule, box, max_sample_spacing_m=0.005),
+            capsule_box_distance_m(capsule, box, samples=201),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

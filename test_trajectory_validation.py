@@ -39,7 +39,16 @@ class TrajectoryValidationTests(unittest.TestCase):
         q2 = q1 + 0.1
         trajectory = RobotTrajectory(
             points=[_point(0, q0, 0.0, 0.2), _point(1, q1, 0.1, 0.3), _point(2, q2, 0.2, 0.4)],
-            report=IKReport(True, 4, 3, [7], ["waypoint 2: link sample below bed clearance"], 0.0, 0.0),
+            report=IKReport(
+                success=False,
+                attempted=10,
+                generated=10,
+                successful=7,
+                failed_indices=[2, 7, 9],
+                warnings=["waypoint 2: link sample below bed clearance"],
+                total_joint_motion_rad=0.0,
+                estimated_cartesian_length_m=0.0,
+            ),
             config=config,
         )
         timed = retime_trajectory(trajectory, np.full(7, 2.0), np.full(7, 20.0))
@@ -47,7 +56,10 @@ class TrajectoryValidationTests(unittest.TestCase):
         report = validate_trajectory(timed, singularity_threshold=0.6)
 
         self.assertEqual(report.waypoints, 3)
-        self.assertEqual(report.ik_success_rate, 0.75)
+        self.assertEqual(trajectory.report.generated, 10)
+        self.assertEqual(trajectory.report.successful, 7)
+        self.assertEqual(len(trajectory.report.failed_indices), 3)
+        self.assertEqual(report.ik_success_rate, 0.7)
         self.assertAlmostEqual(report.position_error_m.mean, 0.002)
         self.assertGreater(report.maximum_joint_step_rad, 0.0)
         self.assertGreater(report.maximum_joint_velocity_rad_s, 0.0)

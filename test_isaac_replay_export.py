@@ -31,7 +31,7 @@ class IsaacReplayExportTests(unittest.TestCase):
         )
         trajectory = RobotTrajectory(
             points=[point],
-            report=IKReport(True, 1, 1, [], [], 0.0, 0.0),
+            report=IKReport(True, 1, 1, 1, [], [], 0.0, 0.0),
             config=IKConfig(),
         )
 
@@ -43,6 +43,10 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("time_from_start_s", source)
         self.assertIn("interpolate_joint_target", source)
         self.assertIn("controller.apply_action(ArticulationAction", source)
+        self.assertIn("joint_indices=joint_indices", source)
+        self.assertIn("robot.get_dof_index(name)", source)
+        self.assertIn("SETTLING_TIME_S", source)
+        self.assertIn("TRACKING_PLOT_SAMPLE_STRIDE", source)
         self.assertIn("joint_tracking.svg", source)
         self.assertIn("maximum_tracking_error_rad", source)
         self.assertNotIn("robot.set_joint_positions", source)

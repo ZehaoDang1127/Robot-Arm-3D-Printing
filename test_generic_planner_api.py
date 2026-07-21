@@ -16,8 +16,8 @@ class GenericPlannerApiTests(unittest.TestCase):
         self.assertIsInstance(URDFRobotPlanner(config), URDFRobotPlanner)
 
     def test_legacy_panda_names_remain_compatible(self):
-        self.assertIs(URDFIKConfig, IKConfig)
-        self.assertIs(solve_urdf_path, solve_path_ik)
+        self.assertIsInstance(IKConfig(), URDFIKConfig)
+        self.assertNotEqual(solve_urdf_path.__module__, solve_path_ik.__module__)
 
 
 if __name__ == "__main__":

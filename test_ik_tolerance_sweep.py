@@ -29,7 +29,16 @@ def _trajectory(tolerance_m: float) -> RobotTrajectory:
     )
     return RobotTrajectory(
         points=[point],
-        report=IKReport(True, 2, 1, [1], [], 0.0, 0.0),
+        report=IKReport(
+            success=False,
+            attempted=2,
+            generated=1,
+            successful=1,
+            failed_indices=[1],
+            warnings=[],
+            total_joint_motion_rad=0.0,
+            estimated_cartesian_length_m=0.0,
+        ),
         config=IKConfig(),
     )
 

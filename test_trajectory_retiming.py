@@ -30,7 +30,7 @@ def _point(index: int, q: float, x: float, feed: float) -> TrajectoryPoint:
 def _trajectory(points: list[TrajectoryPoint]) -> RobotTrajectory:
     return RobotTrajectory(
         points=points,
-        report=IKReport(True, len(points), len(points), [], [], 0.0, 0.0),
+        report=IKReport(True, len(points), len(points), len(points), [], [], 0.0, 0.0),
         config=IKConfig(joint_names=["joint_1"]),
     )
 
@@ -45,6 +45,8 @@ class RetimingTests(unittest.TestCase):
         self.assertAlmostEqual(timed.points[2].time_from_start_s, 1.0, places=9)
         self.assertLessEqual(abs(timed.points[1].joint_velocity_rad_s[0]), 2.0)
         self.assertLessEqual(abs(timed.points[2].joint_velocity_rad_s[0]), 2.0)
+        self.assertEqual(timed.points[0].joint_velocity_rad_s[0], 0.0)
+        self.assertEqual(timed.points[-1].joint_velocity_rad_s[0], 0.0)
         self.assertEqual(trajectory.points[1].time_from_start_s, 0.0)
 
     def test_expands_duration_to_satisfy_acceleration_limit(self):
@@ -53,9 +55,9 @@ class RetimingTests(unittest.TestCase):
         timed = retime_trajectory(trajectory, np.array([100.0]), np.array([1.0]))
 
         self.assertGreaterEqual(timed.points[1].time_from_start_s, 1.0 - 1e-9)
-        self.assertGreaterEqual(timed.points[2].time_from_start_s - timed.points[1].time_from_start_s, 1.0 - 1e-9)
-        self.assertLessEqual(abs(timed.points[1].joint_acceleration_rad_s2[0]), 1.0 + 1e-9)
-        self.assertLessEqual(abs(timed.points[2].joint_acceleration_rad_s2[0]), 1.0 + 1e-9)
+        self.assertLessEqual(np.max(np.abs([point.joint_acceleration_rad_s2[0] for point in timed.points])), 1.0 + 1e-9)
+        self.assertEqual(timed.points[0].joint_velocity_rad_s[0], 0.0)
+        self.assertEqual(timed.points[-1].joint_velocity_rad_s[0], 0.0)
 
 
 if __name__ == "__main__":

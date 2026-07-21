@@ -54,6 +54,8 @@ DEPOSITION_EVERY_N_PRINT_POINTS = 1
 MAX_DEPOSITION_MARKERS = 20000
 BEAD_RADIUS_M = 0.0012
 BEAD_COLOR = Gf.Vec3f(1.0, 0.28, 0.03)
+SETTLING_TIME_S = 2.0
+TRACKING_PLOT_SAMPLE_STRIDE = 10
 
 
 def load_rows(path):
@@ -110,24 +112,18 @@ def interpolate_joint_target(rows, time_s, cursor):
     return [a + alpha * (b - a) for a, b in zip(first["q"], second["q"])], cursor
 
 
-def write_tracking_outputs(samples):
-    if not samples:
-        return
-    with TRACKING_CSV.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["simulation_time_s", *[f"desired_{{name}}" for name in JOINT_COLUMNS], *[f"actual_{{name}}" for name in JOINT_COLUMNS], *[f"error_{{name}}" for name in JOINT_COLUMNS]])
-        for sample in samples:
-            writer.writerow([sample["time_s"], *sample["desired"], *sample["actual"], *sample["error"]])
-    all_errors = [abs(value) for sample in samples for value in sample["error"]]
-    rms = math.sqrt(sum(value * value for sample in samples for value in sample["error"]) / max(1, len(all_errors)))
+def write_tracking_outputs(samples, sample_count, sum_squared_error, maximum_error):
+    rms = math.sqrt(sum_squared_error / max(1, sample_count))
     TRACKING_JSON.write_text(json.dumps({{
-        "samples": len(samples),
-        "maximum_tracking_error_rad": max(all_errors, default=0.0),
+        "samples": sample_count,
+        "plot_samples": len(samples),
+        "maximum_tracking_error_rad": maximum_error,
         "rms_tracking_error_rad": rms,
     }}, indent=2))
-    write_tracking_svg(samples)
+    if samples:
+        write_tracking_svg(samples)
     print(f"tracking log: {{TRACKING_CSV}}")
-    print(f"maximum tracking error: {{max(all_errors, default=0.0):.6g}} rad")
+    print(f"maximum tracking error: {{maximum_error:.6g}} rad")
     print(f"RMS tracking error: {{rms:.6g}} rad")
 
 
@@ -169,12 +165,31 @@ ensure_deposition_root(world.stage)
 
 trajectory = load_rows(TRAJECTORY_CSV)
 controller = robot.get_articulation_controller()
+joint_indices = []
+for name in JOINT_COLUMNS:
+    index = robot.get_dof_index(name)
+    if index is None or index < 0:
+        raise RuntimeError(f"robot does not expose required joint '{{name}}'")
+    joint_indices.append(index)
+joint_indices = np.asarray(joint_indices, dtype=int)
 cursor = 0
 last_row_index = -1
 print_point_counter = 0
 marker_count = 0
 tracking_samples = []
+tracking_sample_count = 0
+sum_squared_error = 0.0
+maximum_tracking_error = 0.0
+physics_step_count = 0
 fallback_time_s = 0.0
+tracking_file = TRACKING_CSV.open("w", newline="")
+tracking_writer = csv.writer(tracking_file)
+tracking_writer.writerow([
+    "simulation_time_s",
+    *[f"desired_{{name}}" for name in JOINT_COLUMNS],
+    *[f"actual_{{name}}" for name in JOINT_COLUMNS],
+    *[f"error_{{name}}" for name in JOINT_COLUMNS],
+])
 
 try:
     while simulation_app.is_running():
@@ -188,18 +203,28 @@ try:
         q_desired, row_index = interpolate_joint_target(trajectory, simulation_time_s, cursor)
         cursor = row_index
         # Send targets to Isaac's articulation controller; do not teleport the arm.
-        controller.apply_action(ArticulationAction(joint_positions=np.asarray(q_desired, dtype=float)))
+        controller.apply_action(ArticulationAction(
+            joint_positions=np.asarray(q_desired, dtype=float),
+            joint_indices=joint_indices,
+        ))
         world.step(render=True)
         fallback_time_s += world.get_physics_dt()
-        actual_positions = robot.get_joint_positions()
+        actual_positions = robot.get_joint_positions(joint_indices=joint_indices)
         q_actual = actual_positions.tolist() if hasattr(actual_positions, "tolist") else list(actual_positions)
         error = [actual - desired for actual, desired in zip(q_actual, q_desired)]
-        tracking_samples.append({{
-            "time_s": simulation_time_s,
-            "desired": q_desired,
-            "actual": q_actual,
-            "error": error,
-        }})
+        tracking_writer.writerow([simulation_time_s, *q_desired, *q_actual, *error])
+        tracking_file.flush()
+        tracking_sample_count += len(error)
+        sum_squared_error += sum(value * value for value in error)
+        maximum_tracking_error = max(maximum_tracking_error, max((abs(value) for value in error), default=0.0))
+        if physics_step_count % TRACKING_PLOT_SAMPLE_STRIDE == 0:
+            tracking_samples.append({{
+                "time_s": simulation_time_s,
+                "desired": q_desired,
+                "actual": q_actual,
+                "error": error,
+            }})
+        physics_step_count += 1
         if DEPOSITION_ENABLED and row_index > last_row_index:
             for deposition_row in trajectory[last_row_index + 1:row_index + 1]:
                 if not deposition_row["is_print"] or deposition_row["de"] <= 0.0:
@@ -215,10 +240,18 @@ try:
                     marker_count,
                     deposition_row["p"],
                     deposition_row["volume_mm3"],
-                )
+            )
             last_row_index = row_index
+        if simulation_time_s >= trajectory[-1]["time_from_start_s"] + SETTLING_TIME_S:
+            break
 finally:
-    write_tracking_outputs(tracking_samples)
+    tracking_file.close()
+    write_tracking_outputs(
+        tracking_samples,
+        tracking_sample_count,
+        sum_squared_error,
+        maximum_tracking_error,
+    )
     simulation_app.close()
 '''
 

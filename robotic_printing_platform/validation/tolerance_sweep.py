@@ -64,7 +64,7 @@ def _entry(trajectory: RobotTrajectory, position_tolerance_m: float, duration_s:
     attempted = trajectory.report.attempted
     return ToleranceSweepEntry(
         position_tolerance_m=position_tolerance_m,
-        ik_success_rate=(float(trajectory.report.solved / attempted) if attempted else 0.0),
+        ik_success_rate=(float(trajectory.report.successful / attempted) if attempted else 0.0),
         position_error_m=_error_statistics(trajectory),
         average_ik_iterations=(
             float(np.mean([point.ik_iterations for point in trajectory.points]))
