@@ -8,12 +8,19 @@ from robotic_printing_platform.robots.ur5 import make_ur5_ik_config
 
 
 class GenericPlannerApiTests(unittest.TestCase):
-    def test_ur5_uses_the_neutral_urdf_configuration_and_planner_api(self):
-        config = make_ur5_ik_config()
+    ROBOT_CONFIG_FACTORIES = {
+        "franka_panda": IKConfig,
+        "ur5": make_ur5_ik_config,
+    }
 
-        self.assertIsInstance(config, URDFIKConfig)
-        self.assertEqual(config.robot_model, "ur5")
-        self.assertIsInstance(URDFRobotPlanner(config), URDFRobotPlanner)
+    def test_all_robot_packages_use_the_generic_urdf_planner_api(self):
+        for robot_model, make_config in self.ROBOT_CONFIG_FACTORIES.items():
+            with self.subTest(robot=robot_model):
+                config = make_config()
+
+                self.assertIsInstance(config, URDFIKConfig)
+                self.assertEqual(config.robot_model, robot_model)
+                self.assertIsInstance(URDFRobotPlanner(config), URDFRobotPlanner)
 
     def test_legacy_panda_names_remain_compatible(self):
         self.assertIsInstance(IKConfig(), URDFIKConfig)
