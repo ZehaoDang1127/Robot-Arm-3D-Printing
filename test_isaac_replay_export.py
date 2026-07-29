@@ -11,6 +11,19 @@ from robotic_printing_platform.robots.franka_panda import IKConfig, IKReport, Ro
 
 
 class IsaacReplayExportTests(unittest.TestCase):
+    def test_ur5e_extruder_bundle_includes_mount_payload(self):
+        repo_root = Path(__file__).resolve().parent
+        assembly = repo_root / "UR5e_extruder.usd"
+        mount_payload = repo_root / "Mount_Extruder_Models" / "ur5_mount_extruder.usd"
+
+        self.assertTrue(assembly.is_file(), "UR5e assembly USD is missing")
+        self.assertTrue(
+            mount_payload.is_file(),
+            "UR5e_extruder.usd requires Mount_Extruder_Models/ur5_mount_extruder.usd",
+        )
+        with mount_payload.open("rb") as payload_file:
+            self.assertEqual(payload_file.read(8), b"PXR-USDC")
+
     def test_generates_time_interpolated_position_target_replay(self):
         point = TrajectoryPoint(
             index=0,
