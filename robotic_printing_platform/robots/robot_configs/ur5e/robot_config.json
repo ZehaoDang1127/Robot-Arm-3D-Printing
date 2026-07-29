@@ -1,0 +1,36 @@
+{
+  "model": "ur5e",
+  "parameter_source": "NVIDIA Isaac Sim 5.1 UR5e physics asset",
+  "urdf_path": "robot.urdf",
+  "base_link": "base_link",
+  "end_link": "tool0",
+  "joint_names": [
+    "shoulder_pan_joint",
+    "shoulder_lift_joint",
+    "elbow_joint",
+    "wrist_1_joint",
+    "wrist_2_joint",
+    "wrist_3_joint"
+  ],
+  "home_q_rad": [0.0, -1.5707963267948966, 0.0, -1.5707963267948966, 0.0, 0.0],
+  "joint_limits_rad": [
+    [-6.283185307179586, 6.283185307179586],
+    [-6.283185307179586, 6.283185307179586],
+    [-3.141592653589793, 3.141592653589793],
+    [-6.283185307179586, 6.283185307179586],
+    [-6.283185307179586, 6.283185307179586],
+    [-6.283185307179586, 6.283185307179586]
+  ],
+  "joint_velocity_limits_rad_s": [3.141592653589793, 3.141592653589793, 3.141592653589793, 3.141592653589793, 3.141592653589793, 3.141592653589793],
+  "joint_acceleration_limits_rad_s2": [10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
+  "max_reach_m": 0.85,
+  "collision_skip_frames": 4,
+  "isaac_usd_path": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd",
+  "ik": {
+    "pos_tol_m": 0.002
+  },
+  "parameter_references": {
+    "isaac_physics": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/UniversalRobots/ur5e/configuration/ur5e_physics.usd",
+    "ros_description": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description"
+  }
+}

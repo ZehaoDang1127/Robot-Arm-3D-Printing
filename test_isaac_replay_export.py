@@ -64,6 +64,9 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("maximum_tracking_error_rad", source)
         self.assertIn("enable_robot_physics_variants", source)
         self.assertIn('variant_set.SetVariantSelection("PhysX")', source)
+        self.assertIn("repair_extruder_mount", source)
+        self.assertIn("UsdPhysics.CollisionAPI.Apply(mesh_prim)", source)
+        self.assertIn("UsdGeom.Tokens.faceVarying", source)
         self.assertIn("find_or_create_articulation_root", source)
         self.assertIn("Usd.TraverseInstanceProxies()", source)
         self.assertIn("UsdPhysics.ArticulationRootAPI", source)
@@ -72,9 +75,16 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("prim.IsA(UsdPhysics.RevoluteJoint)", source)
         self.assertIn("available articulation DOFs", source)
         self.assertIn("robot = SingleArticulation(prim_path=ARTICULATION_PRIM", source)
+        self.assertIn("initialize_at_first_target", source)
+        self.assertEqual(source.count("robot.set_joint_positions("), 1)
+        self.assertIn("INITIALIZATION_TOLERANCE_RAD", source)
+        self.assertIn("DEPOSITION_MAX_JOINT_ERROR_RAD", source)
+        self.assertIn("MAX_ACCEPTABLE_TRACKING_ERROR_RAD", source)
+        self.assertIn('"tracking_passed"', source)
+        self.assertIn('"initialization_duration_s"', source)
+        self.assertIn('"skipped_deposition_points_due_to_tracking"', source)
         self.assertIn('os.environ.get("RPP_TRAJECTORY_CSV"', source)
         self.assertNotIn(str(bundle["csv"].resolve()), source)
-        self.assertNotIn("robot.set_joint_positions", source)
 
     def test_custom_robot_usd_overrides_configured_asset(self):
         point = TrajectoryPoint(

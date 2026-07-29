@@ -72,6 +72,12 @@ MAX_DEPOSITION_MARKERS = 20000
 BEAD_RADIUS_M = 0.0012
 BEAD_COLOR = Gf.Vec3f(1.0, 0.28, 0.03)
 SETTLING_TIME_S = 2.0
+INITIALIZATION_TIMEOUT_S = 10.0
+INITIALIZATION_TOLERANCE_RAD = 0.02
+INITIALIZATION_STABLE_STEPS = 10
+DEPOSITION_MAX_JOINT_ERROR_RAD = 0.05
+MAX_ACCEPTABLE_TRACKING_ERROR_RAD = 0.05
+MAX_ACCEPTABLE_RMS_TRACKING_ERROR_RAD = 0.02
 TRACKING_PLOT_SAMPLE_STRIDE = 10
 
 
@@ -107,6 +113,49 @@ def enable_robot_physics_variants(stage, reference_prim_path):
             f"enabled robot physics variant: {{prim.GetPath()}} "
             f"Physics={{previous!r}} -> 'PhysX'"
         )
+
+
+def repair_extruder_mount(stage, reference_prim_path):
+    """Repair the known mount payload's mesh metadata and collider in memory."""
+    mount_path = f"{{reference_prim_path}}/ur5_mount_extruder"
+    mesh_path = f"{{mount_path}}/MeshBody1"
+    mount_prim = stage.GetPrimAtPath(mount_path)
+    mesh_prim = stage.GetPrimAtPath(mesh_path)
+    if not mount_prim.IsValid() or not mesh_prim.IsA(UsdGeom.Mesh):
+        print(f"extruder mount repair skipped; mesh not found: {{mesh_path}}")
+        return
+
+    mesh = UsdGeom.Mesh(mesh_prim)
+    normals = mesh.GetNormalsAttr().Get() or []
+    face_vertex_counts = mesh.GetFaceVertexCountsAttr().Get() or []
+    expected_face_varying_count = sum(int(count) for count in face_vertex_counts)
+    if (
+        len(normals) > 0
+        and len(normals) == expected_face_varying_count
+        and mesh.GetNormalsInterpolation() != UsdGeom.Tokens.faceVarying
+    ):
+        mesh.SetNormalsInterpolation(UsdGeom.Tokens.faceVarying)
+        print(f"repaired mount normals interpolation: {{mesh_path}} -> faceVarying")
+
+    collision_api = UsdPhysics.CollisionAPI.Apply(mesh_prim)
+    collision_api.CreateCollisionEnabledAttr(True)
+    mesh_collision_api = UsdPhysics.MeshCollisionAPI.Apply(mesh_prim)
+    mesh_collision_api.CreateApproximationAttr().Set("convexHull")
+    print(f"enabled mount convex-hull collision: {{mesh_path}}")
+
+    mass_override = os.environ.get("RPP_MOUNT_MASS_KG")
+    if mass_override:
+        try:
+            mass_kg = float(mass_override)
+        except ValueError as error:
+            raise RuntimeError("RPP_MOUNT_MASS_KG must be a positive number") from error
+        if not math.isfinite(mass_kg) or mass_kg <= 0.0:
+            raise RuntimeError("RPP_MOUNT_MASS_KG must be a positive number")
+        mass_api = UsdPhysics.MassAPI.Apply(mount_prim)
+        mass_api.CreateMassAttr().Set(mass_kg)
+        print(f"set measured mount/extruder mass: {{mass_kg:.6g}} kg")
+    else:
+        print("mount mass: automatic from collider (set RPP_MOUNT_MASS_KG to override)")
 
 
 def find_or_create_articulation_root(stage, reference_prim_path):
@@ -220,19 +269,71 @@ def interpolate_joint_target(rows, time_s, cursor):
     return [a + alpha * (b - a) for a, b in zip(first["q"], second["q"])], cursor
 
 
-def write_tracking_outputs(samples, sample_count, sum_squared_error, maximum_error):
+def initialize_at_first_target(world, robot, controller, joint_indices, initial_q):
+    """Place the arm at q[0], then settle before starting the replay clock."""
+    initial_q = np.asarray(initial_q, dtype=float)
+    robot.set_joint_positions(initial_q, joint_indices=joint_indices)
+    robot.set_joint_velocities(np.zeros_like(initial_q), joint_indices=joint_indices)
+    stable_steps = 0
+    elapsed_s = 0.0
+    maximum_error = float("inf")
+    while simulation_app.is_running() and elapsed_s < INITIALIZATION_TIMEOUT_S:
+        controller.apply_action(ArticulationAction(
+            joint_positions=initial_q,
+            joint_indices=joint_indices,
+        ))
+        world.step(render=True)
+        elapsed_s += world.get_physics_dt()
+        actual = robot.get_joint_positions(joint_indices=joint_indices)
+        maximum_error = float(np.max(np.abs(np.asarray(actual) - initial_q)))
+        stable_steps = stable_steps + 1 if maximum_error <= INITIALIZATION_TOLERANCE_RAD else 0
+        if stable_steps >= INITIALIZATION_STABLE_STEPS:
+            print(
+                f"initialization settled in {{elapsed_s:.3f}} s; "
+                f"maximum joint error {{maximum_error:.6g}} rad"
+            )
+            return elapsed_s, maximum_error
+    raise RuntimeError(
+        f"robot did not settle at the first trajectory pose within "
+        f"{{INITIALIZATION_TIMEOUT_S:.3f}} s; maximum joint error "
+        f"{{maximum_error:.6g}} rad"
+    )
+
+
+def write_tracking_outputs(
+    samples,
+    sample_count,
+    sum_squared_error,
+    maximum_error,
+    initialization_duration_s,
+    initialization_error_rad,
+    deposited_markers,
+    skipped_deposition_points,
+):
     rms = math.sqrt(sum_squared_error / max(1, sample_count))
+    tracking_passed = (
+        maximum_error <= MAX_ACCEPTABLE_TRACKING_ERROR_RAD
+        and rms <= MAX_ACCEPTABLE_RMS_TRACKING_ERROR_RAD
+    )
     TRACKING_JSON.write_text(json.dumps({{
+        "initialization_duration_s": initialization_duration_s,
+        "initialization_error_rad": initialization_error_rad,
         "samples": sample_count,
         "plot_samples": len(samples),
         "maximum_tracking_error_rad": maximum_error,
         "rms_tracking_error_rad": rms,
+        "maximum_acceptable_tracking_error_rad": MAX_ACCEPTABLE_TRACKING_ERROR_RAD,
+        "maximum_acceptable_rms_tracking_error_rad": MAX_ACCEPTABLE_RMS_TRACKING_ERROR_RAD,
+        "tracking_passed": tracking_passed,
+        "deposited_markers": deposited_markers,
+        "skipped_deposition_points_due_to_tracking": skipped_deposition_points,
     }}, indent=2))
     if samples:
         write_tracking_svg(samples)
     print(f"tracking log: {{TRACKING_CSV}}")
     print(f"maximum tracking error: {{maximum_error:.6g}} rad")
     print(f"RMS tracking error: {{rms:.6g}} rad")
+    print(f"tracking validation: {{'PASS' if tracking_passed else 'FAIL'}}")
 
 
 def write_tracking_svg(samples):
@@ -267,6 +368,7 @@ world = World(stage_units_in_meters=1.0)
 world.scene.add_default_ground_plane()
 add_reference_to_stage(ROBOT_USD, ROBOT_PRIM)
 enable_robot_physics_variants(world.stage, ROBOT_PRIM)
+repair_extruder_mount(world.stage, ROBOT_PRIM)
 ARTICULATION_PRIM = find_or_create_articulation_root(world.stage, ROBOT_PRIM)
 print(f"robot asset: {{ROBOT_USD}}")
 print(f"articulation root: {{ARTICULATION_PRIM}}")
@@ -276,6 +378,8 @@ world.reset()
 ensure_deposition_root(world.stage)
 
 trajectory = load_rows(TRAJECTORY_CSV)
+if not trajectory:
+    raise RuntimeError(f"trajectory contains no rows: {{TRAJECTORY_CSV}}")
 controller = robot.get_articulation_controller()
 available_dof_names = list(robot.dof_names)
 print(f"available articulation DOFs: {{available_dof_names}}")
@@ -295,20 +399,28 @@ for name in JOINT_COLUMNS:
         )
     joint_indices.append(index)
 joint_indices = np.asarray(joint_indices, dtype=int)
+initialization_duration_s, initialization_error_rad = initialize_at_first_target(
+    world,
+    robot,
+    controller,
+    joint_indices,
+    trajectory[0]["q"],
+)
 cursor = 0
 last_row_index = -1
 print_point_counter = 0
 marker_count = 0
+skipped_deposition_points = 0
 tracking_samples = []
 tracking_sample_count = 0
 sum_squared_error = 0.0
 maximum_tracking_error = 0.0
 physics_step_count = 0
-fallback_time_s = 0.0
+replay_time_s = 0.0
 tracking_file = TRACKING_CSV.open("w", newline="")
 tracking_writer = csv.writer(tracking_file)
 tracking_writer.writerow([
-    "simulation_time_s",
+    "trajectory_time_s",
     *[f"desired_{{name}}" for name in JOINT_COLUMNS],
     *[f"actual_{{name}}" for name in JOINT_COLUMNS],
     *[f"error_{{name}}" for name in JOINT_COLUMNS],
@@ -319,30 +431,27 @@ try:
         if not trajectory:
             world.step(render=True)
             continue
-        try:
-            simulation_time_s = float(world.current_time)
-        except AttributeError:
-            simulation_time_s = fallback_time_s
-        q_desired, row_index = interpolate_joint_target(trajectory, simulation_time_s, cursor)
+        command_time_s = replay_time_s
+        q_desired, row_index = interpolate_joint_target(trajectory, command_time_s, cursor)
         cursor = row_index
-        # Send targets to Isaac's articulation controller; do not teleport the arm.
+        # Send targets to Isaac's controller; do not teleport during replay.
         controller.apply_action(ArticulationAction(
             joint_positions=np.asarray(q_desired, dtype=float),
             joint_indices=joint_indices,
         ))
         world.step(render=True)
-        fallback_time_s += world.get_physics_dt()
+        replay_time_s += world.get_physics_dt()
         actual_positions = robot.get_joint_positions(joint_indices=joint_indices)
         q_actual = actual_positions.tolist() if hasattr(actual_positions, "tolist") else list(actual_positions)
         error = [actual - desired for actual, desired in zip(q_actual, q_desired)]
-        tracking_writer.writerow([simulation_time_s, *q_desired, *q_actual, *error])
+        tracking_writer.writerow([command_time_s, *q_desired, *q_actual, *error])
         tracking_file.flush()
         tracking_sample_count += len(error)
         sum_squared_error += sum(value * value for value in error)
         maximum_tracking_error = max(maximum_tracking_error, max((abs(value) for value in error), default=0.0))
         if physics_step_count % TRACKING_PLOT_SAMPLE_STRIDE == 0:
             tracking_samples.append({{
-                "time_s": simulation_time_s,
+                "time_s": command_time_s,
                 "desired": q_desired,
                 "actual": q_actual,
                 "error": error,
@@ -353,6 +462,9 @@ try:
                 if not deposition_row["is_print"] or deposition_row["de"] <= 0.0:
                     continue
                 print_point_counter += 1
+                if max((abs(value) for value in error), default=0.0) > DEPOSITION_MAX_JOINT_ERROR_RAD:
+                    skipped_deposition_points += 1
+                    continue
                 if print_point_counter % DEPOSITION_EVERY_N_PRINT_POINTS != 0:
                     continue
                 if marker_count >= MAX_DEPOSITION_MARKERS:
@@ -365,7 +477,7 @@ try:
                     deposition_row["volume_mm3"],
             )
             last_row_index = row_index
-        if simulation_time_s >= trajectory[-1]["time_from_start_s"] + SETTLING_TIME_S:
+        if command_time_s >= trajectory[-1]["time_from_start_s"] + SETTLING_TIME_S:
             break
 finally:
     tracking_file.close()
@@ -374,6 +486,10 @@ finally:
         tracking_sample_count,
         sum_squared_error,
         maximum_tracking_error,
+        initialization_duration_s,
+        initialization_error_rad,
+        marker_count,
+        skipped_deposition_points,
     )
     simulation_app.close()
 '''

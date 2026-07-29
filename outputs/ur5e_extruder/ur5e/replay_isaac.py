@@ -1,5 +1,5 @@
 """
-Replay a ur5 joint trajectory exported by this project.
+Replay a ur5e joint trajectory exported by this project.
 
 Run inside Isaac Sim, for example:
     ./python.sh replay_isaac.py
@@ -46,7 +46,7 @@ ROBOT_USD_DEFAULT = (
     else ''
 )
 ROBOT_USD = os.environ.get("RPP_ROBOT_USD", ROBOT_USD_DEFAULT)
-ROBOT_PRIM = "/World/Ur5"
+ROBOT_PRIM = "/World/Ur5E"
 DEPOSITION_PRIM = "/World/PrintedMaterial"
 DEPOSITION_ENABLED = True
 DEPOSITION_EVERY_N_PRINT_POINTS = 1

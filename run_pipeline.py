@@ -20,6 +20,7 @@ DEFAULT_GCODE = "strong_universal_wall_hook_vcd.gcode"
 ROBOT_CONFIG_DIRS = {
     "panda": "robotic_printing_platform/robots/robot_configs/franka_panda",
     "ur5": "robotic_printing_platform/robots/robot_configs/ur5",
+    "ur5e": "robotic_printing_platform/robots/robot_configs/ur5e",
 }
 
 
@@ -48,8 +49,8 @@ def run(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     cfg = load_planner_config(config_path)
-    if robot not in {"panda", "ur5", "both", "config"}:
-        raise ValueError("robot must be one of: panda, ur5, both, config")
+    if robot not in {"panda", "ur5", "ur5e", "both", "config"}:
+        raise ValueError("robot must be one of: panda, ur5, ur5e, both, config")
 
     bed_x = cfg.bed.center_xyz_m[0] if bed_x_m is None else bed_x_m
     bed_y = cfg.bed.center_xyz_m[1] if bed_y_m is None else bed_y_m
@@ -189,7 +190,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--robot",
-        choices=["panda", "ur5", "both", "config"],
+        choices=["panda", "ur5", "ur5e", "both", "config"],
         default="panda",
         help="robot package(s) to run; both writes separate panda/ and ur5/ outputs",
     )

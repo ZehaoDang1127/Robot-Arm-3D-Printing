@@ -19,7 +19,8 @@ solver can evolve independently.
   nozzle-normal strategy.
 - `robotic_printing_platform/robots/` contains the `RobotPlanner` interface,
   URDF kinematics helpers, and swappable robot packages. Built-in packages are
-  `robot_configs/franka_panda/` and `robot_configs/ur5/`.
+  `robot_configs/franka_panda/`, `robot_configs/ur5/`, and
+  `robot_configs/ur5e/`.
 - `robotic_printing_platform/exporters/` writes simulator/runtime artifacts.
 
 Top-level scripts stay small: `run_pipeline.py` runs the workflow and
@@ -59,20 +60,19 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot panda --outp
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5 --output-dir outputs
 ```
 
-Generate a UR5 replay that references the repository's mounted UR5e/extruder
-asset. The replay discovers the articulation root even when the robot is nested
-below an assembly Xform in the custom USD. Relative override paths are written
-to the replay as absolute paths, so the script can be launched from Isaac Sim's
-installation directory:
+Generate a UR5e replay that references the repository's mounted UR5e/extruder
+asset. This command solves the complete first layer with the UR5e model and its
+2 mm IK tolerance. Do not add `--max-ik-waypoints` for a printing-quality
+export:
 
 ```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5 --isaac-usd UR5e_extruder.usd --lo 0 --hi 1 --output-dir outputs/ur5e_extruder
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5e --isaac-usd UR5e_extruder.usd --lo 0 --hi 1 --max-seg-len-mm 20 --simplify-deg 2 --ik-selection-mode greedy --output-dir outputs/ur5e_extruder
 ```
 
 On Windows, launch the resulting standalone script with Isaac Sim's Python:
 
 ```powershell
-.\python.bat D:\HAIM_Lab\robotic-printing-platform\outputs\ur5e_extruder\ur5\replay_isaac.py
+.\python.bat D:\HAIM_Lab\robotic-printing-platform\outputs\ur5e_extruder\ur5e\replay_isaac.py
 ```
 
 The replay resolves both the trajectory CSV and a repository-local custom USD
@@ -82,8 +82,8 @@ PowerShell:
 
 ```powershell
 $env:RPP_ROBOT_USD = 'C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\UR5e_extruder.usd'
-$env:RPP_TRAJECTORY_CSV = 'C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e_extruder\ur5\robot_print_trajectory.csv'
-.\python.bat C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e_extruder\ur5\replay_isaac.py
+$env:RPP_TRAJECTORY_CSV = 'C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e_extruder\ur5e\robot_print_trajectory.csv'
+.\python.bat C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e_extruder\ur5e\replay_isaac.py
 ```
 
 Robot Assembler USDs that contain physics joints but omit an articulation-root
@@ -94,9 +94,23 @@ assembly was saved with the visual-only `Physics=None` variant.
 `Mount_Extruder_Models/ur5_mount_extruder.usd` payload. Keep both files in their
 repository locations when copying the replay bundle to another computer.
 
-The UR5 planner package currently uses the original UR5 URDF. Before treating
-the replay as a calibrated UR5e print, replace or validate that model and set
+The `ur5e` planner uses UR5e link dimensions and a 2 mm IK position tolerance.
+Before treating the replay as a calibrated physical print, set
 `planner_config.json -> nozzle_tcp` to the measured flange-to-nozzle transform.
+If the complete mounted extruder mass is known, set `RPP_MOUNT_MASS_KG` before
+launching Isaac Sim; otherwise replay computes mass automatically from the
+repaired convex-hull collider.
+
+Replay performs a one-time initialization at the first joint pose, waits for
+the arm to settle, and only then starts the trajectory clock and tracking log.
+Deposition markers are skipped whenever joint error exceeds 0.05 rad. Inspect
+`joint_tracking_summary.json`; `tracking_passed` requires maximum error at most
+0.05 rad and RMS error at most 0.02 rad.
+
+The checked-in `outputs/ur5e_extruder/ur5e` bundle contains the complete first
+layer: 7,941 waypoints, 100% IK success, 1.999 mm maximum planned Cartesian
+error, no configured joint velocity/acceleration violations, and an estimated
+591.7 second trajectory duration.
 
 Use a different configuration:
 

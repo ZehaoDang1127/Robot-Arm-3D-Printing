@@ -178,7 +178,10 @@ def load_planner_config(
         selected_robot_data["config_dir"] = str(robot_config_dir)
     robot_data, resolved_robot_config_dir = _load_robot_folder_config(selected_robot_data, config_base_dir)
     bed_data = data.get("bed", {})
-    nozzle_data = data.get("nozzle_tcp", {})
+    nozzle_data = {
+        **data.get("nozzle_tcp", {}),
+        **robot_data.get("nozzle_tcp", {}),
+    }
     material_data = data.get("material", {})
     path_data = data.get("path_preparation", {})
 
@@ -257,5 +260,8 @@ def load_planner_config(
         nozzle_tcp=nozzle_tcp,
         material=material,
         path_preparation=path_preparation,
-        ik=dict(data.get("ik", {})),
+        ik={
+            **data.get("ik", {}),
+            **robot_data.get("ik", {}),
+        },
     )
