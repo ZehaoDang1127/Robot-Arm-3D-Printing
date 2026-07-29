@@ -75,6 +75,20 @@ On Windows, launch the resulting standalone script with Isaac Sim's Python:
 .\python.bat D:\HAIM_Lab\robotic-printing-platform\outputs\ur5e_extruder\ur5\replay_isaac.py
 ```
 
+The replay resolves both the trajectory CSV and a repository-local custom USD
+relative to `replay_isaac.py`, so the output bundle can be cloned to another
+computer without editing embedded paths. To override either path explicitly in
+PowerShell:
+
+```powershell
+$env:RPP_ROBOT_USD = 'C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\UR5e_extruder.usd'
+$env:RPP_TRAJECTORY_CSV = 'C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e_extruder\ur5\robot_print_trajectory.csv'
+.\python.bat C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e_extruder\ur5\replay_isaac.py
+```
+
+Robot Assembler USDs that contain physics joints but omit an articulation-root
+marker are repaired in memory when replay starts; the source USD is not changed.
+
 The UR5 planner package currently uses the original UR5 URDF. Before treating
 the replay as a calibrated UR5e print, replace or validate that model and set
 `planner_config.json -> nozzle_tcp` to the measured flange-to-nozzle transform.

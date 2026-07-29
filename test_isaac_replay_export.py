@@ -49,9 +49,13 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("TRACKING_PLOT_SAMPLE_STRIDE", source)
         self.assertIn("joint_tracking.svg", source)
         self.assertIn("maximum_tracking_error_rad", source)
-        self.assertIn("find_articulation_root", source)
+        self.assertIn("find_or_create_articulation_root", source)
         self.assertIn("UsdPhysics.ArticulationRootAPI", source)
-        self.assertIn("robot = Articulation(ARTICULATION_PRIM)", source)
+        self.assertIn("UsdPhysics.ArticulationRootAPI.Apply(reference_prim)", source)
+        self.assertIn("prim.IsA(UsdPhysics.Joint)", source)
+        self.assertIn("robot = SingleArticulation(prim_path=ARTICULATION_PRIM", source)
+        self.assertIn('os.environ.get("RPP_TRAJECTORY_CSV"', source)
+        self.assertNotIn(str(bundle["csv"].resolve()), source)
         self.assertNotIn("robot.set_joint_positions", source)
 
     def test_custom_robot_usd_overrides_configured_asset(self):
@@ -88,7 +92,9 @@ class IsaacReplayExportTests(unittest.TestCase):
             )
             source = bundle["isaac_script"].read_text(encoding="utf-8")
 
-        self.assertIn(f"ROBOT_USD = {str(custom_usd.resolve())!r}", source)
+        self.assertIn('os.environ.get("RPP_ROBOT_USD", ROBOT_USD_DEFAULT)', source)
+        self.assertIn("ROBOT_USD_RELATIVE = 'UR5e_extruder.usd'", source)
+        self.assertNotIn(str(custom_usd.resolve()), source)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ keeps them in one editable constant near the top.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from robotic_printing_platform.robots.generic import RobotTrajectory
@@ -21,12 +22,13 @@ Replay a {robot_model} joint trajectory exported by this project.
 Run inside Isaac Sim, for example:
     ./python.sh replay_isaac.py
 
-If your Isaac install stores this robot's USD elsewhere, edit ROBOT_USD below.
+Set RPP_ROBOT_USD to override the robot asset path at launch time.
 """
 
 import csv
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -35,18 +37,33 @@ from isaacsim import SimulationApp
 
 simulation_app = SimulationApp({{"headless": False}})
 
-from omni.isaac.core import World
-from omni.isaac.core.articulations import Articulation
-from omni.isaac.core.utils.stage import add_reference_to_stage
-from omni.isaac.core.utils.types import ArticulationAction
+try:
+    from isaacsim.core.api import World
+    from isaacsim.core.prims import SingleArticulation
+    from isaacsim.core.utils.stage import add_reference_to_stage
+    from isaacsim.core.utils.types import ArticulationAction
+except ImportError:  # Isaac Sim 4.x compatibility
+    from omni.isaac.core import World
+    from omni.isaac.core.articulations import Articulation as SingleArticulation
+    from omni.isaac.core.utils.stage import add_reference_to_stage
+    from omni.isaac.core.utils.types import ArticulationAction
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
-TRAJECTORY_CSV = Path(r"{trajectory_csv}")
+SCRIPT_DIR = Path(__file__).resolve().parent
+TRAJECTORY_CSV = Path(
+    os.environ.get("RPP_TRAJECTORY_CSV", SCRIPT_DIR / {trajectory_filename!r})
+).resolve()
 TRACKING_CSV = TRAJECTORY_CSV.with_name("joint_tracking.csv")
 TRACKING_JSON = TRAJECTORY_CSV.with_name("joint_tracking_summary.json")
 TRACKING_SVG = TRAJECTORY_CSV.with_name("joint_tracking.svg")
 JOINT_COLUMNS = {joint_columns}
-ROBOT_USD = {robot_usd_path!r}
+ROBOT_USD_RELATIVE = {robot_usd_relative!r}
+ROBOT_USD_DEFAULT = (
+    str((SCRIPT_DIR / ROBOT_USD_RELATIVE).resolve())
+    if ROBOT_USD_RELATIVE
+    else {robot_usd_fallback!r}
+)
+ROBOT_USD = os.environ.get("RPP_ROBOT_USD", ROBOT_USD_DEFAULT)
 ROBOT_PRIM = "/World/{robot_prim_name}"
 DEPOSITION_PRIM = "/World/PrintedMaterial"
 DEPOSITION_ENABLED = True
@@ -58,11 +75,13 @@ SETTLING_TIME_S = 2.0
 TRACKING_PLOT_SAMPLE_STRIDE = 10
 
 
-def find_articulation_root(stage, reference_prim_path):
-    """Find the single articulation root in a referenced robot asset.
+def find_or_create_articulation_root(stage, reference_prim_path):
+    """Find an articulation root, or mark the assembly root when omitted.
 
     Custom robot USDs commonly wrap the actual articulation below a stage or
-    assembly Xform. Discovering it keeps replay independent of that nesting.
+    assembly Xform. Some Robot Assembler exports retain all PhysicsJoint prims
+    but omit PhysicsArticulationRootAPI. For those assets, marking the assembly
+    Xform is valid for both fixed-base and floating articulations.
     """
     reference_prim = stage.GetPrimAtPath(reference_prim_path)
     if not reference_prim.IsValid():
@@ -72,12 +91,34 @@ def find_articulation_root(stage, reference_prim_path):
         for prim in Usd.PrimRange(reference_prim)
         if prim.HasAPI(UsdPhysics.ArticulationRootAPI)
     ]
-    if len(roots) != 1:
+    if len(roots) > 1:
         raise RuntimeError(
             f"expected exactly one articulation root below {{reference_prim_path}}, "
             f"found {{len(roots)}}: {{roots}}"
         )
-    return roots[0]
+    if roots:
+        return roots[0]
+
+    joints = [
+        str(prim.GetPath())
+        for prim in Usd.PrimRange(reference_prim)
+        if prim.IsA(UsdPhysics.Joint)
+    ]
+    if not joints:
+        raise RuntimeError(
+            f"robot asset below {{reference_prim_path}} contains no PhysicsJoint prims; "
+            f"check the USD path and referenced asset dependencies: {{ROBOT_USD}}"
+        )
+    articulation_api = UsdPhysics.ArticulationRootAPI.Apply(reference_prim)
+    if not articulation_api:
+        raise RuntimeError(
+            f"could not apply PhysicsArticulationRootAPI to {{reference_prim_path}}"
+        )
+    print(
+        f"asset had no articulation root marker; applied one to "
+        f"{{reference_prim_path}} (found {{len(joints)}} physics joints)"
+    )
+    return reference_prim_path
 
 
 def load_rows(path):
@@ -180,10 +221,10 @@ def write_tracking_svg(samples):
 world = World(stage_units_in_meters=1.0)
 world.scene.add_default_ground_plane()
 add_reference_to_stage(ROBOT_USD, ROBOT_PRIM)
-ARTICULATION_PRIM = find_articulation_root(world.stage, ROBOT_PRIM)
+ARTICULATION_PRIM = find_or_create_articulation_root(world.stage, ROBOT_PRIM)
 print(f"robot asset: {{ROBOT_USD}}")
 print(f"articulation root: {{ARTICULATION_PRIM}}")
-robot = Articulation(ARTICULATION_PRIM)
+robot = SingleArticulation(prim_path=ARTICULATION_PRIM, name="replay_robot")
 world.scene.add(robot)
 world.reset()
 ensure_deposition_root(world.stage)
@@ -297,15 +338,23 @@ def export_isaac_bundle(
     csv_path = out / f"{basename}_trajectory.csv"
     json_path = out / f"{basename}_trajectory.json"
     script_path = out / "replay_isaac.py"
+    robot_usd_relative = (
+        Path(os.path.relpath(effective_robot_usd_path, start=out.resolve())).as_posix()
+        if robot_usd_path is not None
+        else ""
+    )
+    robot_usd_fallback = effective_robot_usd_path if robot_usd_path is None else ""
 
     traj.export_csv(csv_path)
     traj.export_json(json_path)
     script_path.write_text(
         ISAAC_SCRIPT.format(
-            trajectory_csv=str(csv_path.resolve()),
+            trajectory_filename=csv_path.name,
             joint_columns=json.dumps(traj.config.joint_names),
             robot_model=traj.config.robot_model,
             robot_usd_path=effective_robot_usd_path,
+            robot_usd_relative=robot_usd_relative,
+            robot_usd_fallback=robot_usd_fallback,
             robot_prim_name="".join(c if c.isalnum() else "_" for c in traj.config.robot_model.title()),
         )
     )

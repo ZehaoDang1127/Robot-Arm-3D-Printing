@@ -4,12 +4,13 @@ Replay a ur5 joint trajectory exported by this project.
 Run inside Isaac Sim, for example:
     ./python.sh replay_isaac.py
 
-If your Isaac install stores this robot's USD elsewhere, edit ROBOT_USD below.
+Set RPP_ROBOT_USD to override the robot asset path at launch time.
 """
 
 import csv
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -18,18 +19,33 @@ from isaacsim import SimulationApp
 
 simulation_app = SimulationApp({"headless": False})
 
-from omni.isaac.core import World
-from omni.isaac.core.articulations import Articulation
-from omni.isaac.core.utils.stage import add_reference_to_stage
-from omni.isaac.core.utils.types import ArticulationAction
+try:
+    from isaacsim.core.api import World
+    from isaacsim.core.prims import SingleArticulation
+    from isaacsim.core.utils.stage import add_reference_to_stage
+    from isaacsim.core.utils.types import ArticulationAction
+except ImportError:  # Isaac Sim 4.x compatibility
+    from omni.isaac.core import World
+    from omni.isaac.core.articulations import Articulation as SingleArticulation
+    from omni.isaac.core.utils.stage import add_reference_to_stage
+    from omni.isaac.core.utils.types import ArticulationAction
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
-TRAJECTORY_CSV = Path(r"D:\HAIM_Lab\robotic-printing-platform\outputs\ur5e_extruder\ur5\robot_print_trajectory.csv")
+SCRIPT_DIR = Path(__file__).resolve().parent
+TRAJECTORY_CSV = Path(
+    os.environ.get("RPP_TRAJECTORY_CSV", SCRIPT_DIR / 'robot_print_trajectory.csv')
+).resolve()
 TRACKING_CSV = TRAJECTORY_CSV.with_name("joint_tracking.csv")
 TRACKING_JSON = TRAJECTORY_CSV.with_name("joint_tracking_summary.json")
 TRACKING_SVG = TRAJECTORY_CSV.with_name("joint_tracking.svg")
 JOINT_COLUMNS = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
-ROBOT_USD = 'D:\\HAIM_Lab\\robotic-printing-platform\\UR5e_extruder.usd'
+ROBOT_USD_RELATIVE = '../../../UR5e_extruder.usd'
+ROBOT_USD_DEFAULT = (
+    str((SCRIPT_DIR / ROBOT_USD_RELATIVE).resolve())
+    if ROBOT_USD_RELATIVE
+    else ''
+)
+ROBOT_USD = os.environ.get("RPP_ROBOT_USD", ROBOT_USD_DEFAULT)
 ROBOT_PRIM = "/World/Ur5"
 DEPOSITION_PRIM = "/World/PrintedMaterial"
 DEPOSITION_ENABLED = True
@@ -41,11 +57,13 @@ SETTLING_TIME_S = 2.0
 TRACKING_PLOT_SAMPLE_STRIDE = 10
 
 
-def find_articulation_root(stage, reference_prim_path):
-    """Find the single articulation root in a referenced robot asset.
+def find_or_create_articulation_root(stage, reference_prim_path):
+    """Find an articulation root, or mark the assembly root when omitted.
 
     Custom robot USDs commonly wrap the actual articulation below a stage or
-    assembly Xform. Discovering it keeps replay independent of that nesting.
+    assembly Xform. Some Robot Assembler exports retain all PhysicsJoint prims
+    but omit PhysicsArticulationRootAPI. For those assets, marking the assembly
+    Xform is valid for both fixed-base and floating articulations.
     """
     reference_prim = stage.GetPrimAtPath(reference_prim_path)
     if not reference_prim.IsValid():
@@ -55,12 +73,34 @@ def find_articulation_root(stage, reference_prim_path):
         for prim in Usd.PrimRange(reference_prim)
         if prim.HasAPI(UsdPhysics.ArticulationRootAPI)
     ]
-    if len(roots) != 1:
+    if len(roots) > 1:
         raise RuntimeError(
             f"expected exactly one articulation root below {reference_prim_path}, "
             f"found {len(roots)}: {roots}"
         )
-    return roots[0]
+    if roots:
+        return roots[0]
+
+    joints = [
+        str(prim.GetPath())
+        for prim in Usd.PrimRange(reference_prim)
+        if prim.IsA(UsdPhysics.Joint)
+    ]
+    if not joints:
+        raise RuntimeError(
+            f"robot asset below {reference_prim_path} contains no PhysicsJoint prims; "
+            f"check the USD path and referenced asset dependencies: {ROBOT_USD}"
+        )
+    articulation_api = UsdPhysics.ArticulationRootAPI.Apply(reference_prim)
+    if not articulation_api:
+        raise RuntimeError(
+            f"could not apply PhysicsArticulationRootAPI to {reference_prim_path}"
+        )
+    print(
+        f"asset had no articulation root marker; applied one to "
+        f"{reference_prim_path} (found {len(joints)} physics joints)"
+    )
+    return reference_prim_path
 
 
 def load_rows(path):
@@ -163,10 +203,10 @@ def write_tracking_svg(samples):
 world = World(stage_units_in_meters=1.0)
 world.scene.add_default_ground_plane()
 add_reference_to_stage(ROBOT_USD, ROBOT_PRIM)
-ARTICULATION_PRIM = find_articulation_root(world.stage, ROBOT_PRIM)
+ARTICULATION_PRIM = find_or_create_articulation_root(world.stage, ROBOT_PRIM)
 print(f"robot asset: {ROBOT_USD}")
 print(f"articulation root: {ARTICULATION_PRIM}")
-robot = Articulation(ARTICULATION_PRIM)
+robot = SingleArticulation(prim_path=ARTICULATION_PRIM, name="replay_robot")
 world.scene.add(robot)
 world.reset()
 ensure_deposition_root(world.stage)
