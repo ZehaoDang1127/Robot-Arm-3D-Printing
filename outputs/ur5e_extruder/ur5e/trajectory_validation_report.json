@@ -1,31 +1,31 @@
 {
-  "waypoints": 7941,
+  "waypoints": 13099,
   "ik_success_rate": 1.0,
   "ik_selection_mode": "greedy",
   "yaw_discontinuity_count": 0,
   "position_error_m": {
-    "mean": 0.0007698106799826402,
-    "maximum": 0.0019993792758562215,
-    "p95": 0.0018486470839058832
+    "mean": 0.0008414798616328648,
+    "maximum": 0.001999994063497903,
+    "p95": 0.0019220274808591225
   },
   "rotation_error_rad": {
-    "mean": 0.00042501294577021405,
-    "maximum": 0.0008968104437976066,
-    "p95": 0.0005568239728514781
+    "mean": 0.00037887586111463205,
+    "maximum": 0.0021983676572886806,
+    "p95": 0.00043725484022834907
   },
-  "total_joint_motion_rad": 40.13469811465686,
-  "maximum_joint_step_rad": 0.04651084793884719,
-  "maximum_joint_velocity_rad_s": 0.33656321490769203,
+  "total_joint_motion_rad": 40.742544172250604,
+  "maximum_joint_step_rad": 0.009337501686482952,
+  "maximum_joint_velocity_rad_s": 0.43283176865561995,
   "maximum_joint_acceleration_rad_s2": 10.000000000000005,
   "joint_velocity_violation_count": 0,
   "joint_acceleration_violation_count": 0,
-  "minimum_joint_limit_margin_rad": 0.834977056952384,
-  "minimum_jacobian_manipulability": 0.048854918299837145,
-  "minimum_jacobian_singular_value": 0.22401359218852682,
+  "minimum_joint_limit_margin_rad": 0.8972242726699764,
+  "minimum_jacobian_manipulability": 0.05265043599922879,
+  "minimum_jacobian_singular_value": 0.23829356759832396,
   "near_singular_waypoint_indices": [],
   "collision_warnings": [],
   "warnings": [],
-  "estimated_print_time_s": 591.71581460163,
+  "estimated_print_time_s": 602.498492233756,
   "timing_is_preview": false,
   "extrusion_volume_mm3": 2526.912650336524,
   "jacobian_sample_stride": 1

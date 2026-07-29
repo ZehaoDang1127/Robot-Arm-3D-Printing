@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -73,6 +74,8 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn('os.environ.get("RPP_ENABLE_MOUNT_COLLISION", "0")', source)
         self.assertIn("UsdGeom.BBoxCache", source)
         self.assertIn("corrected mount scale", source)
+        self.assertIn("corrected mount fixed-joint anchor", source)
+        self.assertIn("mount_scale_correction", source)
         self.assertIn("find_or_create_articulation_root", source)
         self.assertIn("Usd.TraverseInstanceProxies()", source)
         self.assertIn("UsdPhysics.ArticulationRootAPI", source)
@@ -86,6 +89,10 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("INITIALIZATION_TIMEOUT_S = 30.0", source)
         self.assertIn("INITIALIZATION_TOLERANCE_RAD", source)
         self.assertIn("DEPOSITION_MAX_JOINT_ERROR_RAD", source)
+        self.assertIn("spawn_deposition_segment", source)
+        self.assertIn("UsdGeom.BasisCurves.Define", source)
+        self.assertIn("segment_start", source)
+        self.assertNotIn("spawn_deposition_marker", source)
         self.assertIn("MAX_ACCEPTABLE_TRACKING_ERROR_RAD", source)
         self.assertIn('"tracking_passed"', source)
         self.assertIn('"initialization_duration_s"', source)
@@ -130,6 +137,23 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn('os.environ.get("RPP_ROBOT_USD", ROBOT_USD_DEFAULT)', source)
         self.assertIn("ROBOT_USD_RELATIVE = 'UR5e_extruder.usd'", source)
         self.assertNotIn(str(custom_usd.resolve()), source)
+
+        with tempfile.TemporaryDirectory() as directory:
+            custom_usd = Path(directory) / "UR5e_extruder.usd"
+            custom_usd.touch()
+            with mock.patch(
+                "robotic_printing_platform.exporters.isaac.os.path.relpath",
+                side_effect=ValueError("different drives"),
+            ):
+                bundle = export_isaac_bundle(
+                    trajectory,
+                    Path(directory),
+                    robot_usd_path=custom_usd,
+                )
+            fallback_source = bundle["isaac_script"].read_text(encoding="utf-8")
+
+        self.assertIn("ROBOT_USD_RELATIVE = ''", fallback_source)
+        self.assertIn(repr(str(custom_usd.resolve()))[1:-1], fallback_source)
 
 
 if __name__ == "__main__":

@@ -66,7 +66,7 @@ asset. This command solves the complete first layer with the UR5e model and its
 export:
 
 ```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5e --isaac-usd UR5e_extruder.usd --lo 0 --hi 1 --max-seg-len-mm 20 --simplify-deg 2 --ik-selection-mode greedy --output-dir outputs/ur5e_extruder
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5e --isaac-usd UR5e_extruder.usd --lo 0 --hi 1 --max-seg-len-mm 2 --simplify-deg 0 --ik-selection-mode greedy --output-dir outputs/ur5e_extruder
 ```
 
 On Windows, launch the resulting standalone script with Isaac Sim's Python:
@@ -94,9 +94,10 @@ assembly was saved with the visual-only `Physics=None` variant.
 `Mount_Extruder_Models/ur5_mount_extruder.usd` payload. Keep both files in their
 repository locations when copying the replay bundle to another computer.
 
-The `ur5e` planner uses UR5e link dimensions and a 2 mm IK position tolerance.
-Before treating the replay as a calibrated physical print, set
-`planner_config.json -> nozzle_tcp` to the measured flange-to-nozzle transform.
+The `ur5e` planner uses the official UR/NVIDIA joint frames, a 2 mm IK position
+tolerance, and a CAD-derived nozzle TCP matching the corrected mount and its
+fixed-joint anchor. Measure and override that TCP before treating a different
+mount revision as a calibrated physical print.
 If the complete mounted extruder mass is known, set `RPP_MOUNT_MASS_KG` before
 launching Isaac Sim; otherwise replay computes mass automatically from the
 repaired convex-hull collider.
@@ -118,10 +119,15 @@ used. Without `RPP_MOUNT_MASS_KG`, replay uses a 1 kg simulation fallback in
 place of the asset's invalid negative/automatic mass; enter the measured total
 mount and extruder payload mass for physically calibrated dynamics.
 
-The checked-in `outputs/ur5e_extruder/ur5e` bundle contains the complete first
-layer: 7,941 waypoints, 100% IK success, 1.999 mm maximum planned Cartesian
-error, no configured joint velocity/acceleration violations, and an estimated
-591.7 second trajectory duration.
+Printed moves are exported with simplification disabled and at most 2 mm between
+waypoints. Replay draws a linear bead segment for every extruding move, so it
+does not leave visual gaps between sparse waypoint markers.
+
+The checked-in first-layer bundle contains 13,099 waypoints (11,177 printing),
+100% IK success, 1.99999 mm maximum planned Cartesian error, no configured
+velocity/acceleration violations, no collision warnings, and a 602.5 second
+trajectory. Its UR5e-specific TCP is derived from the corrected fixed-joint
+anchor and the CAD nozzle-tip vertex.
 
 Use a different configuration:
 

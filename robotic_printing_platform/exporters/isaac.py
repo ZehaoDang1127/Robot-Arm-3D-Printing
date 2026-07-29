@@ -131,6 +131,7 @@ def repair_extruder_mount(stage, reference_prim_path):
     mesh = UsdGeom.Mesh(mesh_prim)
     scale_attr = mount_prim.GetAttribute("xformOp:scale")
     authored_scale = scale_attr.Get() if scale_attr.IsValid() else None
+    mount_scale_correction = 1.0
     if authored_scale is not None:
         bbox_cache = UsdGeom.BBoxCache(
             Usd.TimeCode.Default(),
@@ -156,6 +157,10 @@ def repair_extruder_mount(stage, reference_prim_path):
         else:
             corrected_scale = None
         if corrected_scale is not None:
+            if abs(float(authored_scale[0])) > 1e-12:
+                mount_scale_correction = (
+                    float(corrected_scale[0]) / float(authored_scale[0])
+                )
             scale_attr.Set(corrected_scale)
             corrected_bbox_cache = UsdGeom.BBoxCache(
                 Usd.TimeCode.Default(),
@@ -171,6 +176,21 @@ def repair_extruder_mount(stage, reference_prim_path):
                 f"corrected mount scale: {{tuple(authored_scale)}} -> "
                 f"{{tuple(corrected_scale)}}; maximum dimension "
                 f"{{current_dimension_m:.3f}} m -> {{corrected_dimension_m:.3f}} m"
+            )
+
+    fixed_joint_prim = stage.GetPrimAtPath(f"{{mount_path}}/FixedJoint")
+    if fixed_joint_prim.IsValid() and not math.isclose(mount_scale_correction, 1.0):
+        local_pos_attr = fixed_joint_prim.GetAttribute("physics:localPos0")
+        local_pos = local_pos_attr.Get() if local_pos_attr.IsValid() else None
+        if local_pos is not None:
+            corrected_local_pos = Gf.Vec3f(*[
+                float(local_pos[axis]) * mount_scale_correction
+                for axis in range(3)
+            ])
+            local_pos_attr.Set(corrected_local_pos)
+            print(
+                f"corrected mount fixed-joint anchor: {{tuple(local_pos)}} -> "
+                f"{{tuple(corrected_local_pos)}}"
             )
 
     normals = mesh.GetNormalsAttr().Get() or []
@@ -293,22 +313,24 @@ def ensure_deposition_root(stage):
     UsdGeom.Xform.Define(stage, Sdf.Path(DEPOSITION_PRIM))
 
 
-def spawn_deposition_marker(stage, marker_index, position, volume_mm3):
-    """Create a visual bead marker at a deposited waypoint.
-
-    This is intentionally visual-only. A later version can replace these
-    spheres with cylinders/curves between waypoints or physics-enabled material.
-    """
+def spawn_deposition_segment(stage, marker_index, start, end, volume_mm3):
+    """Draw the complete extruded move, including space between waypoints."""
     prim_path = Sdf.Path(f"{{DEPOSITION_PRIM}}/bead_{{marker_index:06d}}")
-    sphere = UsdGeom.Sphere.Define(stage, prim_path)
     radius = BEAD_RADIUS_M
     if volume_mm3 > 0.0:
         # Keep visual size stable, but let higher-flow segments read slightly thicker.
         radius *= max(0.6, min(1.8, (volume_mm3 / 0.28) ** (1.0 / 3.0)))
-    sphere.CreateRadiusAttr(radius)
-    sphere.CreateDisplayColorAttr([BEAD_COLOR])
-    xform = UsdGeom.Xformable(sphere.GetPrim())
-    xform.AddTranslateOp().Set(Gf.Vec3d(position[0], position[1], position[2]))
+    curves = UsdGeom.BasisCurves.Define(stage, prim_path)
+    curves.CreateTypeAttr(UsdGeom.Tokens.linear)
+    curves.CreateWrapAttr(UsdGeom.Tokens.nonperiodic)
+    curves.CreateCurveVertexCountsAttr([2])
+    curves.CreatePointsAttr([
+        Gf.Vec3f(float(start[0]), float(start[1]), float(start[2])),
+        Gf.Vec3f(float(end[0]), float(end[1]), float(end[2])),
+    ])
+    curves.CreateWidthsAttr([2.0 * radius])
+    curves.SetWidthsInterpolation(UsdGeom.Tokens.constant)
+    curves.CreateDisplayColorAttr([BEAD_COLOR])
 
 
 def interpolate_joint_target(rows, time_s, cursor):
@@ -465,7 +487,6 @@ initialization_duration_s, initialization_error_rad = initialize_at_first_target
 )
 cursor = 0
 last_row_index = -1
-print_point_counter = 0
 marker_count = 0
 skipped_deposition_points = 0
 tracking_samples = []
@@ -515,21 +536,27 @@ try:
             }})
         physics_step_count += 1
         if DEPOSITION_ENABLED and row_index > last_row_index:
-            for deposition_row in trajectory[last_row_index + 1:row_index + 1]:
+            for deposition_index in range(last_row_index + 1, row_index + 1):
+                deposition_row = trajectory[deposition_index]
                 if not deposition_row["is_print"] or deposition_row["de"] <= 0.0:
                     continue
-                print_point_counter += 1
                 if max((abs(value) for value in error), default=0.0) > DEPOSITION_MAX_JOINT_ERROR_RAD:
                     skipped_deposition_points += 1
                     continue
-                if print_point_counter % DEPOSITION_EVERY_N_PRINT_POINTS != 0:
+                if (deposition_index + 1) % DEPOSITION_EVERY_N_PRINT_POINTS != 0:
                     continue
                 if marker_count >= MAX_DEPOSITION_MARKERS:
                     continue
                 marker_count += 1
-                spawn_deposition_marker(
+                segment_start = (
+                    trajectory[deposition_index - 1]["p"]
+                    if deposition_index > 0
+                    else deposition_row["p"]
+                )
+                spawn_deposition_segment(
                     world.stage,
                     marker_count,
+                    segment_start,
                     deposition_row["p"],
                     deposition_row["volume_mm3"],
             )
@@ -568,12 +595,17 @@ def export_isaac_bundle(
     csv_path = out / f"{basename}_trajectory.csv"
     json_path = out / f"{basename}_trajectory.json"
     script_path = out / "replay_isaac.py"
-    robot_usd_relative = (
-        Path(os.path.relpath(effective_robot_usd_path, start=out.resolve())).as_posix()
-        if robot_usd_path is not None
-        else ""
-    )
-    robot_usd_fallback = effective_robot_usd_path if robot_usd_path is None else ""
+    robot_usd_relative = ""
+    robot_usd_fallback = effective_robot_usd_path
+    if robot_usd_path is not None:
+        try:
+            robot_usd_relative = Path(
+                os.path.relpath(effective_robot_usd_path, start=out.resolve())
+            ).as_posix()
+            robot_usd_fallback = ""
+        except ValueError:
+            # Windows cannot form a relative path across drive letters.
+            pass
 
     traj.export_csv(csv_path)
     traj.export_json(json_path)

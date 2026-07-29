@@ -3,9 +3,16 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 from robotic_printing_platform.config import load_planner_config
 from robotic_printing_platform.robots.franka_panda import IKConfig, solve_path_ik
-from robotic_printing_platform.robots.generic import URDFIKConfig, URDFRobotPlanner, solve_urdf_path
+from robotic_printing_platform.robots.generic import (
+    URDFIKConfig,
+    URDFRobotPlanner,
+    solve_urdf_path,
+    urdf_fk,
+)
 from robotic_printing_platform.robots.ur5 import make_ur5_ik_config
 
 
@@ -38,9 +45,27 @@ class GenericPlannerApiTests(unittest.TestCase):
 
         self.assertEqual(config.robot.model, "ur5e")
         self.assertAlmostEqual(config.make_ik_config().pos_tol_m, 0.002)
+        np.testing.assert_allclose(
+            config.nozzle_tcp.flange_to_nozzle_xyz_m,
+            np.array([-0.0284345792, 0.00774216, 0.146409252]),
+            atol=1e-12,
+        )
         urdf_path = Path(config.robot.urdf_path)
         self.assertEqual(urdf_path.name, "robot.urdf")
         self.assertEqual(urdf_path.parent.name, "ur5e")
+
+        tool_pose, _ = urdf_fk(
+            np.zeros(6),
+            tool_tcp_xyz_m=(0.0, 0.0, 0.0),
+            urdf_path=config.robot.urdf_path,
+            base_link=config.robot.base_link,
+            end_link=config.robot.end_link,
+        )
+        np.testing.assert_allclose(
+            tool_pose[:3, 3],
+            np.array([0.8172, 0.2329, 0.0628]),
+            atol=1e-7,
+        )
 
 
 if __name__ == "__main__":

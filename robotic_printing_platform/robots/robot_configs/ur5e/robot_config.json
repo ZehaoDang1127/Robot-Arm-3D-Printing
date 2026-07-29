@@ -26,6 +26,11 @@
   "max_reach_m": 0.85,
   "collision_skip_frames": 4,
   "isaac_usd_path": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd",
+  "nozzle_tcp": {
+    "flange_to_nozzle_xyz_m": [-0.0284345792, 0.00774216, 0.146409252],
+    "flange_to_nozzle_rpy_rad": [0.0, 0.0, 0.0],
+    "source": "UR5e_extruder.usd corrected fixed-joint anchor plus CAD nozzle-tip vertex"
+  },
   "ik": {
     "pos_tol_m": 0.002
   },
