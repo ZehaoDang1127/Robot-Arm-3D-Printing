@@ -75,6 +75,40 @@ SETTLING_TIME_S = 2.0
 TRACKING_PLOT_SAMPLE_STRIDE = 10
 
 
+def enable_robot_physics_variants(stage, reference_prim_path):
+    """Select PhysX on referenced robot assets that were saved as visual-only."""
+    reference_prim = stage.GetPrimAtPath(reference_prim_path)
+    if not reference_prim.IsValid():
+        raise RuntimeError(f"robot reference prim does not exist: {{reference_prim_path}}")
+    subtree = list(Usd.PrimRange(reference_prim, Usd.TraverseInstanceProxies()))
+    physics_variant_prims = [
+        prim
+        for prim in subtree
+        if "Physics" in prim.GetVariantSets().GetNames()
+    ]
+    for prim in physics_variant_prims:
+        variant_set = prim.GetVariantSets().GetVariantSet("Physics")
+        variant_names = variant_set.GetVariantNames()
+        if "PhysX" not in variant_names:
+            continue
+        previous = variant_set.GetVariantSelection()
+        if previous == "PhysX":
+            continue
+        if prim.IsInstanceProxy():
+            raise RuntimeError(
+                f"cannot select the PhysX variant on instance proxy {{prim.GetPath()}}"
+            )
+        if not variant_set.SetVariantSelection("PhysX"):
+            raise RuntimeError(
+                f"failed to select the PhysX variant on {{prim.GetPath()}}; "
+                f"available variants: {{variant_names}}"
+            )
+        print(
+            f"enabled robot physics variant: {{prim.GetPath()}} "
+            f"Physics={{previous!r}} -> 'PhysX'"
+        )
+
+
 def find_or_create_articulation_root(stage, reference_prim_path):
     """Find an articulation root, or mark the assembly root when omitted.
 
@@ -232,6 +266,7 @@ def write_tracking_svg(samples):
 world = World(stage_units_in_meters=1.0)
 world.scene.add_default_ground_plane()
 add_reference_to_stage(ROBOT_USD, ROBOT_PRIM)
+enable_robot_physics_variants(world.stage, ROBOT_PRIM)
 ARTICULATION_PRIM = find_or_create_articulation_root(world.stage, ROBOT_PRIM)
 print(f"robot asset: {{ROBOT_USD}}")
 print(f"articulation root: {{ARTICULATION_PRIM}}")

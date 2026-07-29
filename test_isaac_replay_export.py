@@ -62,6 +62,8 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("TRACKING_PLOT_SAMPLE_STRIDE", source)
         self.assertIn("joint_tracking.svg", source)
         self.assertIn("maximum_tracking_error_rad", source)
+        self.assertIn("enable_robot_physics_variants", source)
+        self.assertIn('variant_set.SetVariantSelection("PhysX")', source)
         self.assertIn("find_or_create_articulation_root", source)
         self.assertIn("Usd.TraverseInstanceProxies()", source)
         self.assertIn("UsdPhysics.ArticulationRootAPI", source)

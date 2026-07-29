@@ -88,6 +88,8 @@ $env:RPP_TRAJECTORY_CSV = 'C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\
 
 Robot Assembler USDs that contain physics joints but omit an articulation-root
 marker are repaired in memory when replay starts; the source USD is not changed.
+The replay also selects a referenced robot's `Physics=PhysX` variant when an
+assembly was saved with the visual-only `Physics=None` variant.
 `UR5e_extruder.usd` also depends on the checked-in
 `Mount_Extruder_Models/ur5_mount_extruder.usd` payload. Keep both files in their
 repository locations when copying the replay bundle to another computer.
