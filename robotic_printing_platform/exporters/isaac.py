@@ -39,7 +39,7 @@ from omni.isaac.core import World
 from omni.isaac.core.articulations import Articulation
 from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core.utils.types import ArticulationAction
-from pxr import Gf, Sdf, UsdGeom
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
 TRAJECTORY_CSV = Path(r"{trajectory_csv}")
 TRACKING_CSV = TRAJECTORY_CSV.with_name("joint_tracking.csv")
@@ -56,6 +56,28 @@ BEAD_RADIUS_M = 0.0012
 BEAD_COLOR = Gf.Vec3f(1.0, 0.28, 0.03)
 SETTLING_TIME_S = 2.0
 TRACKING_PLOT_SAMPLE_STRIDE = 10
+
+
+def find_articulation_root(stage, reference_prim_path):
+    """Find the single articulation root in a referenced robot asset.
+
+    Custom robot USDs commonly wrap the actual articulation below a stage or
+    assembly Xform. Discovering it keeps replay independent of that nesting.
+    """
+    reference_prim = stage.GetPrimAtPath(reference_prim_path)
+    if not reference_prim.IsValid():
+        raise RuntimeError(f"robot reference prim does not exist: {{reference_prim_path}}")
+    roots = [
+        str(prim.GetPath())
+        for prim in Usd.PrimRange(reference_prim)
+        if prim.HasAPI(UsdPhysics.ArticulationRootAPI)
+    ]
+    if len(roots) != 1:
+        raise RuntimeError(
+            f"expected exactly one articulation root below {{reference_prim_path}}, "
+            f"found {{len(roots)}}: {{roots}}"
+        )
+    return roots[0]
 
 
 def load_rows(path):
@@ -158,7 +180,10 @@ def write_tracking_svg(samples):
 world = World(stage_units_in_meters=1.0)
 world.scene.add_default_ground_plane()
 add_reference_to_stage(ROBOT_USD, ROBOT_PRIM)
-robot = Articulation(ROBOT_PRIM)
+ARTICULATION_PRIM = find_articulation_root(world.stage, ROBOT_PRIM)
+print(f"robot asset: {{ROBOT_USD}}")
+print(f"articulation root: {{ARTICULATION_PRIM}}")
+robot = Articulation(ARTICULATION_PRIM)
 world.scene.add(robot)
 world.reset()
 ensure_deposition_root(world.stage)
@@ -260,9 +285,15 @@ def export_isaac_bundle(
     traj: RobotTrajectory,
     output_dir: str | Path = "outputs",
     basename: str = "robot_print",
+    robot_usd_path: str | Path | None = None,
 ) -> dict[str, Path]:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    effective_robot_usd_path = (
+        traj.config.isaac_usd_path
+        if robot_usd_path is None
+        else str(Path(robot_usd_path).resolve())
+    )
     csv_path = out / f"{basename}_trajectory.csv"
     json_path = out / f"{basename}_trajectory.json"
     script_path = out / "replay_isaac.py"
@@ -274,7 +305,7 @@ def export_isaac_bundle(
             trajectory_csv=str(csv_path.resolve()),
             joint_columns=json.dumps(traj.config.joint_names),
             robot_model=traj.config.robot_model,
-            robot_usd_path=traj.config.isaac_usd_path,
+            robot_usd_path=effective_robot_usd_path,
             robot_prim_name="".join(c if c.isalnum() else "_" for c in traj.config.robot_model.title()),
         )
     )

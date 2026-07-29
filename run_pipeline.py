@@ -42,6 +42,7 @@ def run(
     position_tolerance_sweep_mm: list[float] | None = None,
     all_layers: bool = False,
     robot: str = "panda",
+    isaac_usd: str | Path | None = None,
 ):
     path = Path(path)
     out = Path(output_dir)
@@ -140,7 +141,7 @@ def run(
             print()
 
             print("=== Stage 4: export ===")
-            bundle = export_isaac_bundle(traj, robot_out)
+            bundle = export_isaac_bundle(traj, robot_out, robot_usd_path=isaac_usd)
             bundle["validation_report"] = validation_path
             bundles[robot_cfg.robot.model] = bundle
             for name, file_path in bundle.items():
@@ -192,6 +193,11 @@ def _parse_args() -> argparse.Namespace:
         default="panda",
         help="robot package(s) to run; both writes separate panda/ and ur5/ outputs",
     )
+    parser.add_argument(
+        "--isaac-usd",
+        default=None,
+        help="override the robot USD referenced by the generated Isaac replay script",
+    )
     return parser.parse_args()
 
 
@@ -215,4 +221,5 @@ if __name__ == "__main__":
         position_tolerance_sweep_mm=args.position_tolerance_sweep_mm,
         all_layers=args.all_layers,
         robot=args.robot,
+        isaac_usd=args.isaac_usd,
     )

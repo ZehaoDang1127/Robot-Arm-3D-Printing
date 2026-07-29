@@ -59,6 +59,26 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot panda --outp
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5 --output-dir outputs
 ```
 
+Generate a UR5 replay that references the repository's mounted UR5e/extruder
+asset. The replay discovers the articulation root even when the robot is nested
+below an assembly Xform in the custom USD. Relative override paths are written
+to the replay as absolute paths, so the script can be launched from Isaac Sim's
+installation directory:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5 --isaac-usd UR5e_extruder.usd --lo 0 --hi 1 --output-dir outputs/ur5e_extruder
+```
+
+On Windows, launch the resulting standalone script with Isaac Sim's Python:
+
+```powershell
+.\python.bat D:\HAIM_Lab\robotic-printing-platform\outputs\ur5e_extruder\ur5\replay_isaac.py
+```
+
+The UR5 planner package currently uses the original UR5 URDF. Before treating
+the replay as a calibrated UR5e print, replace or validate that model and set
+`planner_config.json -> nozzle_tcp` to the measured flange-to-nozzle transform.
+
 Use a different configuration:
 
 ```bash

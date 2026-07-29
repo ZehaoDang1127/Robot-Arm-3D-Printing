@@ -49,7 +49,46 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("TRACKING_PLOT_SAMPLE_STRIDE", source)
         self.assertIn("joint_tracking.svg", source)
         self.assertIn("maximum_tracking_error_rad", source)
+        self.assertIn("find_articulation_root", source)
+        self.assertIn("UsdPhysics.ArticulationRootAPI", source)
+        self.assertIn("robot = Articulation(ARTICULATION_PRIM)", source)
         self.assertNotIn("robot.set_joint_positions", source)
+
+    def test_custom_robot_usd_overrides_configured_asset(self):
+        point = TrajectoryPoint(
+            index=0,
+            q=np.zeros(7),
+            p=np.zeros(3),
+            yaw=0.0,
+            is_print=False,
+            layer=0,
+            seg_id=0,
+            feed_m_s=0.01,
+            de=0.0,
+            material="PLA",
+            extrusion_volume_mm3=0.0,
+            extrusion_mass_g=0.0,
+            pos_error_m=0.0,
+            rot_error_rad=0.0,
+            time_from_start_s=0.0,
+        )
+        trajectory = RobotTrajectory(
+            points=[point],
+            report=IKReport(True, 1, 1, 1, [], [], 0.0, 0.0),
+            config=IKConfig(),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            custom_usd = Path(directory) / "UR5e_extruder.usd"
+            custom_usd.touch()
+            bundle = export_isaac_bundle(
+                trajectory,
+                Path(directory),
+                robot_usd_path=custom_usd,
+            )
+            source = bundle["isaac_script"].read_text(encoding="utf-8")
+
+        self.assertIn(f"ROBOT_USD = {str(custom_usd.resolve())!r}", source)
 
 
 if __name__ == "__main__":
