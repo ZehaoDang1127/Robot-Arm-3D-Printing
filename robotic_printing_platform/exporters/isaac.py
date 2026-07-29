@@ -86,9 +86,12 @@ def find_or_create_articulation_root(stage, reference_prim_path):
     reference_prim = stage.GetPrimAtPath(reference_prim_path)
     if not reference_prim.IsValid():
         raise RuntimeError(f"robot reference prim does not exist: {{reference_prim_path}}")
+    # Instanceable robot references expose their descendants as instance
+    # proxies, which ordinary Usd.PrimRange traversal intentionally skips.
+    subtree = list(Usd.PrimRange(reference_prim, Usd.TraverseInstanceProxies()))
     roots = [
         str(prim.GetPath())
-        for prim in Usd.PrimRange(reference_prim)
+        for prim in subtree
         if prim.HasAPI(UsdPhysics.ArticulationRootAPI)
     ]
     if len(roots) > 1:
@@ -101,13 +104,21 @@ def find_or_create_articulation_root(stage, reference_prim_path):
 
     joints = [
         str(prim.GetPath())
-        for prim in Usd.PrimRange(reference_prim)
+        for prim in subtree
         if prim.IsA(UsdPhysics.Joint)
     ]
-    if not joints:
+    movable_joints = [
+        str(prim.GetPath())
+        for prim in subtree
+        if prim.IsA(UsdPhysics.RevoluteJoint)
+        or prim.IsA(UsdPhysics.PrismaticJoint)
+    ]
+    if len(movable_joints) < len(JOINT_COLUMNS):
         raise RuntimeError(
-            f"robot asset below {{reference_prim_path}} contains no PhysicsJoint prims; "
-            f"check the USD path and referenced asset dependencies: {{ROBOT_USD}}"
+            f"robot asset below {{reference_prim_path}} exposes only "
+            f"{{len(movable_joints)}} movable physics joints (expected at least "
+            f"{{len(JOINT_COLUMNS)}}). Refusing to mark a mount or rigid body as "
+            f"the robot articulation. Joints found: {{joints}}; asset: {{ROBOT_USD}}"
         )
     articulation_api = UsdPhysics.ArticulationRootAPI.Apply(reference_prim)
     if not articulation_api:
@@ -231,11 +242,22 @@ ensure_deposition_root(world.stage)
 
 trajectory = load_rows(TRAJECTORY_CSV)
 controller = robot.get_articulation_controller()
+available_dof_names = list(robot.dof_names)
+print(f"available articulation DOFs: {{available_dof_names}}")
 joint_indices = []
 for name in JOINT_COLUMNS:
-    index = robot.get_dof_index(name)
+    try:
+        index = robot.get_dof_index(name)
+    except (KeyError, ValueError) as error:
+        raise RuntimeError(
+            f"robot articulation {{ARTICULATION_PRIM}} does not expose required "
+            f"joint '{{name}}'; available DOFs: {{available_dof_names}}"
+        ) from error
     if index is None or index < 0:
-        raise RuntimeError(f"robot does not expose required joint '{{name}}'")
+        raise RuntimeError(
+            f"robot articulation {{ARTICULATION_PRIM}} returned invalid index "
+            f"{{index}} for joint '{{name}}'; available DOFs: {{available_dof_names}}"
+        )
     joint_indices.append(index)
 joint_indices = np.asarray(joint_indices, dtype=int)
 cursor = 0
