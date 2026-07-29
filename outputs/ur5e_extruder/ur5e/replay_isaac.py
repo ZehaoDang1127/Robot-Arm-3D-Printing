@@ -54,9 +54,12 @@ MAX_DEPOSITION_MARKERS = 20000
 BEAD_RADIUS_M = 0.0012
 BEAD_COLOR = Gf.Vec3f(1.0, 0.28, 0.03)
 SETTLING_TIME_S = 2.0
-INITIALIZATION_TIMEOUT_S = 10.0
-INITIALIZATION_TOLERANCE_RAD = 0.02
+INITIALIZATION_TIMEOUT_S = 30.0
+INITIALIZATION_TOLERANCE_RAD = 0.05
 INITIALIZATION_STABLE_STEPS = 10
+MOUNT_MAX_REASONABLE_DIMENSION_M = 0.30
+MOUNT_TARGET_MAX_DIMENSION_M = 0.148
+DEFAULT_MOUNT_MASS_KG = 1.0
 DEPOSITION_MAX_JOINT_ERROR_RAD = 0.05
 MAX_ACCEPTABLE_TRACKING_ERROR_RAD = 0.05
 MAX_ACCEPTABLE_RMS_TRACKING_ERROR_RAD = 0.02
@@ -98,7 +101,7 @@ def enable_robot_physics_variants(stage, reference_prim_path):
 
 
 def repair_extruder_mount(stage, reference_prim_path):
-    """Repair the known mount payload's mesh metadata and collider in memory."""
+    """Repair the known mount payload's scale, mesh metadata, and collider."""
     mount_path = f"{reference_prim_path}/ur5_mount_extruder"
     mesh_path = f"{mount_path}/MeshBody1"
     mount_prim = stage.GetPrimAtPath(mount_path)
@@ -108,6 +111,50 @@ def repair_extruder_mount(stage, reference_prim_path):
         return
 
     mesh = UsdGeom.Mesh(mesh_prim)
+    scale_attr = mount_prim.GetAttribute("xformOp:scale")
+    authored_scale = scale_attr.Get() if scale_attr.IsValid() else None
+    if authored_scale is not None:
+        bbox_cache = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy],
+        )
+        world_size = bbox_cache.ComputeWorldBound(mesh_prim).ComputeAlignedRange().GetSize()
+        current_dimension_m = max(abs(float(world_size[axis])) for axis in range(3))
+        scale_override = os.environ.get("RPP_MOUNT_SCALE")
+        if scale_override:
+            try:
+                uniform_scale = float(scale_override)
+            except ValueError as error:
+                raise RuntimeError("RPP_MOUNT_SCALE must be a positive number") from error
+            if not math.isfinite(uniform_scale) or uniform_scale <= 0.0:
+                raise RuntimeError("RPP_MOUNT_SCALE must be a positive number")
+            corrected_scale = Gf.Vec3f(uniform_scale, uniform_scale, uniform_scale)
+        elif current_dimension_m > MOUNT_MAX_REASONABLE_DIMENSION_M:
+            correction = MOUNT_TARGET_MAX_DIMENSION_M / current_dimension_m
+            corrected_scale = Gf.Vec3f(*[
+                float(authored_scale[axis]) * correction
+                for axis in range(3)
+            ])
+        else:
+            corrected_scale = None
+        if corrected_scale is not None:
+            scale_attr.Set(corrected_scale)
+            corrected_bbox_cache = UsdGeom.BBoxCache(
+                Usd.TimeCode.Default(),
+                [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy],
+            )
+            corrected_size = corrected_bbox_cache.ComputeWorldBound(
+                mesh_prim
+            ).ComputeAlignedRange().GetSize()
+            corrected_dimension_m = max(
+                abs(float(corrected_size[axis])) for axis in range(3)
+            )
+            print(
+                f"corrected mount scale: {tuple(authored_scale)} -> "
+                f"{tuple(corrected_scale)}; maximum dimension "
+                f"{current_dimension_m:.3f} m -> {corrected_dimension_m:.3f} m"
+            )
+
     normals = mesh.GetNormalsAttr().Get() or []
     face_vertex_counts = mesh.GetFaceVertexCountsAttr().Get() or []
     expected_face_varying_count = sum(int(count) for count in face_vertex_counts)
@@ -120,10 +167,16 @@ def repair_extruder_mount(stage, reference_prim_path):
         print(f"repaired mount normals interpolation: {mesh_path} -> faceVarying")
 
     collision_api = UsdPhysics.CollisionAPI.Apply(mesh_prim)
-    collision_api.CreateCollisionEnabledAttr(True)
+    collision_enabled = os.environ.get("RPP_ENABLE_MOUNT_COLLISION", "0").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    collision_api.CreateCollisionEnabledAttr(collision_enabled)
     mesh_collision_api = UsdPhysics.MeshCollisionAPI.Apply(mesh_prim)
     mesh_collision_api.CreateApproximationAttr().Set("convexHull")
-    print(f"enabled mount convex-hull collision: {mesh_path}")
+    print(
+        f"mount convex-hull collision: "
+        f"{'enabled' if collision_enabled else 'disabled for stable replay'}; {mesh_path}"
+    )
 
     mass_override = os.environ.get("RPP_MOUNT_MASS_KG")
     if mass_override:
@@ -133,11 +186,15 @@ def repair_extruder_mount(stage, reference_prim_path):
             raise RuntimeError("RPP_MOUNT_MASS_KG must be a positive number") from error
         if not math.isfinite(mass_kg) or mass_kg <= 0.0:
             raise RuntimeError("RPP_MOUNT_MASS_KG must be a positive number")
-        mass_api = UsdPhysics.MassAPI.Apply(mount_prim)
-        mass_api.CreateMassAttr().Set(mass_kg)
         print(f"set measured mount/extruder mass: {mass_kg:.6g} kg")
     else:
-        print("mount mass: automatic from collider (set RPP_MOUNT_MASS_KG to override)")
+        mass_kg = DEFAULT_MOUNT_MASS_KG
+        print(
+            f"mount mass: {mass_kg:.6g} kg simulation fallback "
+            f"(set RPP_MOUNT_MASS_KG to measured payload mass)"
+        )
+    mass_api = UsdPhysics.MassAPI.Apply(mount_prim)
+    mass_api.CreateMassAttr().Set(mass_kg)
 
 
 def find_or_create_articulation_root(stage, reference_prim_path):

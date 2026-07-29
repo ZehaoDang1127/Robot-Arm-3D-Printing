@@ -107,6 +107,17 @@ Deposition markers are skipped whenever joint error exceeds 0.05 rad. Inspect
 `joint_tracking_summary.json`; `tracking_passed` requires maximum error at most
 0.05 rad and RMS error at most 0.02 rad.
 
+The supplied mount CAD payload is authored in 0.1 mm units even though its
+assembly transform originally used the usual millimetre conversion. Replay
+detects and corrects the resulting 1.48 m mount to a 0.148 m maximum dimension
+before physics starts. Mount collision is disabled by default because replay is
+a trajectory/deposition visualization; set `RPP_ENABLE_MOUNT_COLLISION=1` only
+when physical tool contact is intentionally being tested. `RPP_MOUNT_SCALE`
+can explicitly override the uniform mount scale if a different CAD revision is
+used. Without `RPP_MOUNT_MASS_KG`, replay uses a 1 kg simulation fallback in
+place of the asset's invalid negative/automatic mass; enter the measured total
+mount and extruder payload mass for physically calibrated dynamics.
+
 The checked-in `outputs/ur5e_extruder/ur5e` bundle contains the complete first
 layer: 7,941 waypoints, 100% IK success, 1.999 mm maximum planned Cartesian
 error, no configured joint velocity/acceleration violations, and an estimated

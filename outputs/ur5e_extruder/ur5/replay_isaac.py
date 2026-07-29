@@ -7,6 +7,24 @@ Run inside Isaac Sim, for example:
 Set RPP_ROBOT_USD to override the robot asset path at launch time.
 """
 
+# This directory contains the obsolete UR5 preview kept for compatibility.
+# Redirect old lab commands to the complete UR5e replay bundle.
+import os as _redirect_os
+import runpy as _runpy
+from pathlib import Path as _RedirectPath
+
+_legacy_dir = _RedirectPath(__file__).resolve().parent
+_ur5e_script = _legacy_dir.parent / "ur5e" / "replay_isaac.py"
+_ur5e_trajectory = _legacy_dir.parent / "ur5e" / "robot_print_trajectory.csv"
+if not _ur5e_script.is_file() or not _ur5e_trajectory.is_file():
+    raise RuntimeError(f"complete UR5e replay bundle is missing: {_ur5e_script}")
+_configured_trajectory = _redirect_os.environ.get("RPP_TRAJECTORY_CSV")
+if not _configured_trajectory or _RedirectPath(_configured_trajectory).resolve().parent == _legacy_dir:
+    _redirect_os.environ["RPP_TRAJECTORY_CSV"] = str(_ur5e_trajectory)
+print(f"redirecting legacy UR5 replay to complete UR5e bundle: {_ur5e_script}")
+_runpy.run_path(str(_ur5e_script), run_name="__main__")
+raise SystemExit(0)
+
 import csv
 import json
 import math
