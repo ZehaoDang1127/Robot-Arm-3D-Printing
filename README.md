@@ -26,6 +26,28 @@ replay bundle for NVIDIA Isaac Sim.
 - **Built-in validation** — report IK residuals, joint-limit margin, velocity and acceleration violations, Jacobian quality, estimated print time, and lightweight collision warnings.
 - **Simulation-ready output** — generate CSV/JSON trajectories, SVG diagnostics, an Isaac Sim replay, visual bead deposition, and desired-versus-actual joint-tracking logs.
 
+## UR5e mounted-extruder replay showcase
+
+<div align="center">
+  <a href="./Robotic_3D%20Printing_demo.mp4">
+    <img src="./.github/assets/ur5e-mounted-extruder-replay.gif" width="640" alt="Isaac Sim replay of a UR5e with a mounted extruder following the wall-hook print path">
+  </a>
+  <br>
+  <sub><a href="./Robotic_3D%20Printing_demo.mp4">Watch the full 77-second replay</a></sub>
+</div>
+
+The recording demonstrates the complete, uncapped first-layer replay generated
+by the [UR5e command below](#4-generate-the-ur5e-mounted-extruder-replay), not
+the coarse smoke-test configuration:
+
+| Replay setting | Recorded configuration |
+| --- | --- |
+| Input and layer range | `strong_universal_wall_hook_vcd.gcode`, `--lo 0 --hi 1` (the complete first parsed layer) |
+| Robot and tool asset | `--robot ur5e` with `--isaac-usd UR5e_extruder.usd`, including the repository-local mounted-extruder payload and UR5e nozzle TCP |
+| Path preparation | `--max-seg-len-mm 2` and `--simplify-deg 0` |
+| IK selection and coverage | `--ik-selection-mode greedy`, full waypoint coverage, and no `--max-ik-waypoints` cap |
+| Replay output | Retimed position-target playback in Isaac Sim with orange visual bead deposition for printing moves |
+
 ## What is the Robotic Printing Platform?
 
 Conventional slicers describe how a Cartesian 3D printer should move; they do
