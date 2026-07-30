@@ -1,161 +1,283 @@
+<div align="center">
+
 # Robotic Printing Platform
 
-This project converts Cura/Marlin G-code into robot-ready printing waypoints,
-then solves a robot-specific trajectory for simulation or export. The code is
-now organized so the parser, material/extrusion model, path planner, and robot
-solver can evolve independently.
+### From slicer output to robot-aware additive-manufacturing trajectories
 
-## Package Layout
+[![Tests](https://github.com/ZehaoDang1127/Robot-Arm-3D-Printing/actions/workflows/tests.yml/badge.svg)](https://github.com/ZehaoDang1127/Robot-Arm-3D-Printing/actions/workflows/tests.yml)
+![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![NumPy](https://img.shields.io/badge/runtime-NumPy-013243?logo=numpy&logoColor=white)
+![Isaac Sim](https://img.shields.io/badge/export-NVIDIA%20Isaac%20Sim-76B900?logo=nvidia&logoColor=white)
 
-- `robotic_printing_platform/gcode/` parses G-code motion, including explicit
-  `E` extrusion words, absolute extruder state, per-move `de`, feedrate, layers,
-  travels, and retractions.
-- `robotic_printing_platform/extrusion/` converts raw `E` deltas into
-  material-specific volume and optional mass using a swappable
-  `MaterialProfile`.
-- `robotic_printing_platform/path_planning/` contains the default
-  `LayeredPathPlanner` plus the `PathPlanningAlgorithm` interface. Replace this
-  module when you want a different ordering, smoothing, non-planar planning, or
-  nozzle-normal strategy.
-- `robotic_printing_platform/robots/` contains the `RobotPlanner` interface,
-  URDF kinematics helpers, and swappable robot packages. Built-in packages are
-  `robot_configs/franka_panda/`, `robot_configs/ur5/`, and
-  `robot_configs/ur5e/`.
-- `robotic_printing_platform/exporters/` writes simulator/runtime artifacts.
+Convert Cura/Marlin G-code into material-aware Cartesian waypoints, solve a
+robot-specific joint trajectory, validate it, and export a self-contained
+replay bundle for NVIDIA Isaac Sim.
 
-Top-level scripts stay small: `run_pipeline.py` runs the workflow and
-`visualize_pipeline.py` writes SVG diagnostics. `analyze_urdf_ik.py` runs direct
-URDF FK/workspace/IK checks. Core implementation lives in the
-`robotic_printing_platform/` package.
+</div>
 
-## Install
+---
 
-Use Python 3.10+.
+## Highlights
 
-```bash
-pip install -r requirements.txt
+- **End-to-end planning** — parse G-code, prepare the print path, solve URDF-based inverse kinematics, retime the trajectory, validate it, and export simulation artifacts from one CLI.
+- **Slicer-faithful extrusion** — preserve each move's raw `E` state and extrusion delta while converting deposited filament into material volume and optional mass.
+- **Robot-agnostic core** — use the included Franka Panda, UR5, and UR5e packages or add another serial manipulator through a URDF and a JSON configuration.
+- **Redundancy-aware IK** — sample nozzle yaw and select solutions greedily or with a global dynamic-programming pass designed to reduce motion and discontinuities along print runs.
+- **Built-in validation** — report IK residuals, joint-limit margin, velocity and acceleration violations, Jacobian quality, estimated print time, and lightweight collision warnings.
+- **Simulation-ready output** — generate CSV/JSON trajectories, SVG diagnostics, an Isaac Sim replay, visual bead deposition, and desired-versus-actual joint-tracking logs.
+
+## What is the Robotic Printing Platform?
+
+Conventional slicers describe how a Cartesian 3D printer should move; they do
+not account for the kinematics, redundancy, limits, singularities, or geometry
+of a multi-axis robot arm. This project bridges that gap. It treats the G-code
+as the manufacturing intent, preserves its layer, feedrate, travel, retraction,
+and extrusion semantics, then translates the selected print layers into a
+robot-base-frame trajectory suitable for analysis and simulation.
+
+The repository is organized as a set of replaceable stages rather than a
+single robot-specific script. The G-code parser, material model, path planner,
+robot solver, trajectory retimer, validation tools, and simulator exporter
+have explicit boundaries, making the platform useful both as a working UR5e
+printing pipeline and as a foundation for research on robot-aware additive
+manufacturing.
+
+> [!IMPORTANT]
+> This is a planning and simulation toolchain. It does not command physical
+> hardware. Before a real print, independently calibrate the robot model, base
+> and bed frames, nozzle TCP, payload, collision geometry, process timing, and
+> safety system in the production control stack.
+
+## Pipeline at a glance
+
+```mermaid
+flowchart LR
+    A["Cura / Marlin G-code"] --> B["1 · Modal parser"]
+    B --> C["2 · Layered path preparation"]
+    C --> D["3 · URDF IK + yaw selection"]
+    D --> E["4 · Retiming + validation"]
+    E --> F["5 · CSV / JSON / SVG export"]
+    F --> G["Isaac Sim replay + tracking"]
+
+    H["Material profile"] --> C
+    I["Robot package"] --> D
+    J["Bed + nozzle TCP"] --> C
+    J --> D
 ```
 
-The runtime dependency is `numpy`. Isaac Sim is installed separately through
-NVIDIA Omniverse or NVIDIA's Isaac Sim container.
+| Stage | What it does | Key result |
+| --- | --- | --- |
+| Parse | Resolves modal motion and extrusion state from `G0`/`G1`, `G20`/`G21`, `G90`/`G91`, `M82`/`M83`, `G92`, and Cura layer comments. | Absolute printer-frame moves with per-move `de`, feedrate, layer, print/travel state, and bounds. |
+| Prepare | Groups contiguous print and travel runs, simplifies collinear print vertices, densifies long segments, conserves extrusion, and places the part on the configured bed. | Material-aware Cartesian waypoints in metres with a downward planar nozzle axis. |
+| Solve | Loads a serial chain from URDF, runs damped least-squares IK over candidate nozzle yaws, and applies greedy or global selection. | Joint positions, residuals, IK iterations, and Jacobian metrics for each waypoint. |
+| Retime | Starts from the G-code feedrate and increases segment duration as needed to satisfy configured joint velocity and acceleration limits. | A timestamped trajectory that starts and ends at zero joint velocity. |
+| Validate and export | Evaluates trajectory quality and writes simulator/runtime artifacts. | Machine-readable reports, plots, trajectory files, and an Isaac Sim replay script. |
 
-## Quick Run
+## Supported robot packages
 
-Run parsing, path preparation, and visualization:
+All bundled robots use the same `URDFRobotPlanner`; their geometry, joint
+metadata, limits, home pose, simulator asset, TCP, and IK overrides live in
+their own configuration folders.
+
+| CLI name | Model | DoF | Notes |
+| --- | --- | ---: | --- |
+| `panda` | Franka Emika Panda | 7 | Default package; bundled URDF and 855 mm configured reach. |
+| `ur5` | Universal Robots UR5 | 6 | Bundled URDF, UR-style joint chain, and Isaac Sim UR5 asset path. |
+| `ur5e` | Universal Robots UR5e + extruder | 6 | NVIDIA/UR-aligned geometry, custom mounted-extruder USD, CAD-derived nozzle TCP, and a 2 mm position tolerance override. |
+| `both` | Panda + UR5 | — | Runs the same prepared path for both packages and separates their outputs. |
+| `config` | User-selected package | — | Uses `robot.config_dir` from the supplied planner configuration. |
+
+## Quick start
+
+### 1. Install
+
+Python 3.10 or newer is required. NumPy is the only Python runtime dependency.
 
 ```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --lo 0 --hi 1 --skip-ik --output-dir outputs
+git clone https://github.com/ZehaoDang1127/Robot-Arm-3D-Printing.git
+cd Robot-Arm-3D-Printing
+python -m venv .venv
 ```
 
-Run separate Panda and UR5 IK/export smoke tests (the default):
-
-```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --lo 0 --hi 1 --max-seg-len-mm 20 --simplify-deg 2 --max-ik-waypoints 30 --output-dir outputs
-```
-
-Run only one robot package:
-
-```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot panda --output-dir outputs
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5 --output-dir outputs
-```
-
-Generate a UR5e replay that references the repository's mounted UR5e/extruder
-asset. This command solves the complete first layer with the UR5e model and its
-2 mm IK tolerance. Do not add `--max-ik-waypoints` for a printing-quality
-export:
-
-```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --robot ur5e --isaac-usd UR5e_extruder.usd --lo 0 --hi 1 --max-seg-len-mm 2 --simplify-deg 0 --ik-selection-mode greedy --output-dir outputs/ur5e_extruder
-```
-
-On Windows, launch the resulting standalone script with Isaac Sim's Python:
+Activate the environment on Windows:
 
 ```powershell
-.\python.bat D:\HAIM_Lab\robotic-printing-platform\outputs\ur5e_extruder\ur5e\replay_isaac.py
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-The replay resolves both the trajectory CSV and a repository-local custom USD
-relative to `replay_isaac.py`, so the output bundle can be cloned to another
-computer without editing embedded paths. To override either path explicitly in
-PowerShell:
+Or on Linux/macOS:
+
+```bash
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+NVIDIA Isaac Sim is optional and is installed separately. It is only required
+to execute a generated replay, not to parse, plan, validate, or export a path.
+
+### 2. Preview the sample print
+
+Parse and prepare the first layer without running IK:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --lo 0 --hi 1 \
+  --skip-ik \
+  --output-dir outputs/preview
+```
+
+This is the fastest way to inspect the source path, bed placement, print/travel
+classification, and waypoint density.
+
+### 3. Run an IK/export smoke test
+
+Use coarse spacing and a waypoint cap for a quick Panda check:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --robot panda \
+  --lo 0 --hi 1 \
+  --max-seg-len-mm 20 \
+  --simplify-deg 2 \
+  --max-ik-waypoints 30 \
+  --output-dir outputs/smoke
+```
+
+Run the same path against Panda and UR5:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --robot both \
+  --lo 0 --hi 1 \
+  --max-seg-len-mm 20 \
+  --simplify-deg 2 \
+  --max-ik-waypoints 30 \
+  --output-dir outputs/compare
+```
+
+### 4. Generate the UR5e mounted-extruder replay
+
+The following command solves the complete first layer with the UR5e package,
+the repository-local mounted-extruder asset, 2 mm maximum waypoint spacing,
+and no path simplification:
+
+```bash
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --robot ur5e \
+  --isaac-usd UR5e_extruder.usd \
+  --lo 0 --hi 1 \
+  --max-seg-len-mm 2 \
+  --simplify-deg 0 \
+  --ik-selection-mode greedy \
+  --output-dir outputs/ur5e_extruder
+```
+
+Do not add `--max-ik-waypoints` to a printing-quality export: that option is a
+deliberate sampling cap for fast smoke tests.
+
+Launch the generated script with Isaac Sim's Python on Windows:
 
 ```powershell
-$env:RPP_ROBOT_USD = 'C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\UR5e_extruder.usd'
-$env:RPP_TRAJECTORY_CSV = 'C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e_extruder\ur5e\robot_print_trajectory.csv'
-.\python.bat C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e_extruder\ur5e\replay_isaac.py
+& '<ISAAC_SIM_ROOT>\python.bat' '<REPOSITORY_ROOT>\outputs\ur5e_extruder\ur5e\replay_isaac.py'
 ```
 
-Robot Assembler USDs that contain physics joints but omit an articulation-root
-marker are repaired in memory when replay starts; the source USD is not changed.
-The replay also selects a referenced robot's `Physics=PhysX` variant when an
-assembly was saved with the visual-only `Physics=None` variant.
-`UR5e_extruder.usd` also depends on the checked-in
-`Mount_Extruder_Models/ur5_mount_extruder.usd` payload. Keep both files in their
-repository locations when copying the replay bundle to another computer.
+The replay resolves the trajectory CSV and custom USD relative to its own
+location, so the output and repository assets can be moved together without
+embedding machine-specific paths.
 
-The `ur5e` planner uses the official UR/NVIDIA joint frames, a 2 mm IK position
-tolerance, and a CAD-derived nozzle TCP matching the corrected mount and its
-fixed-joint anchor. Measure and override that TCP before treating a different
-mount revision as a calibrated physical print.
-If the complete mounted extruder mass is known, set `RPP_MOUNT_MASS_KG` before
-launching Isaac Sim; otherwise replay computes mass automatically from the
-repaired convex-hull collider.
+## Reference UR5e result
 
-Replay performs a one-time initialization at the first joint pose, waits for
-the arm to settle, and only then starts the trajectory clock and tracking log.
-Deposition markers are skipped whenever joint error exceeds 0.05 rad. Inspect
-`joint_tracking_summary.json`; `tracking_passed` requires maximum error at most
-0.05 rad and RMS error at most 0.02 rad.
+The full first-layer configuration above has been validated with the included
+wall-hook G-code and mounted-extruder model:
 
-The supplied mount CAD payload is authored in 0.1 mm units even though its
-assembly transform originally used the usual millimetre conversion. Replay
-detects and corrects the resulting 1.48 m mount to a 0.148 m maximum dimension
-before physics starts. Mount collision is disabled by default because replay is
-a trajectory/deposition visualization; set `RPP_ENABLE_MOUNT_COLLISION=1` only
-when physical tool contact is intentionally being tested. `RPP_MOUNT_SCALE`
-can explicitly override the uniform mount scale if a different CAD revision is
-used. Without `RPP_MOUNT_MASS_KG`, replay uses a 1 kg simulation fallback in
-place of the asset's invalid negative/automatic mass; enter the measured total
-mount and extruder payload mass for physically calibrated dynamics.
+| Metric | Result |
+| --- | ---: |
+| Total waypoints | 13,099 |
+| Printing waypoints | 11,177 |
+| IK success | 100% |
+| Maximum Cartesian position error | 1.99999 mm |
+| Joint velocity violations | 0 |
+| Joint acceleration violations | 0 |
+| Collision warnings | 0 |
+| Retimed trajectory duration | 602.5 s |
+| Estimated deposited volume | 2,526.91 mm³ |
 
-Printed moves are exported with simplification disabled and at most 2 mm between
-waypoints. Replay draws a linear bead segment for every extruding move, so it
-does not leave visual gaps between sparse waypoint markers.
+These figures validate one software configuration and asset revision; they are
+not a substitute for physical calibration or an independent safety analysis.
 
-The checked-in first-layer bundle contains 13,099 waypoints (11,177 printing),
-100% IK success, 1.99999 mm maximum planned Cartesian error, no configured
-velocity/acceleration violations, no collision warnings, and a 602.5 second
-trajectory. Its UR5e-specific TCP is derived from the corrected fixed-joint
-anchor and the CAD nozzle-tip vertex.
+## Common workflows
 
-Use a different configuration:
+Process every layer without IK:
 
 ```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --config planner_config.json --lo 0 --hi 1
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --all-layers \
+  --skip-ik \
+  --output-dir outputs/all_layers
 ```
 
-Run a direct robot-folder IK analysis:
+Create a coarse all-layer IK preview while retaining coverage of the complete
+path:
 
 ```bash
-python analyze_urdf_ik.py --robot-config-dir robotic_printing_platform/robots/robot_configs/franka_panda --samples 500 --target 0.45 0.0 0.25
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --all-layers \
+  --ik-stride 5000 \
+  --max-seg-len-mm 20 \
+  --simplify-deg 2 \
+  --output-dir outputs/all_layers_preview
 ```
 
-Process every parsed layer:
+Compare local greedy yaw selection with global dynamic programming:
 
 ```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --all-layers --skip-ik --output-dir verify_all_layers
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --robot ur5e \
+  --lo 0 --hi 1 \
+  --ik-selection-mode global_dp \
+  --max-ik-waypoints 100 \
+  --output-dir outputs/global_dp_preview
 ```
 
-For a coarse all-layer IK preview, keep the full path but sample the IK solve:
+Measure IK convergence as the position tolerance tightens:
 
 ```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode --all-layers --max-seg-len-mm 20 --simplify-deg 2 --ik-stride 5000 --output-dir verify_all_layers_preview
+python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --robot ur5e \
+  --lo 0 --hi 1 \
+  --max-ik-waypoints 100 \
+  --position-tolerance-sweep-mm 8 5 3 2 1 \
+  --output-dir outputs/tolerance_sweep
 ```
 
-## Changing Material
+Analyze a robot package directly with FK, workspace sampling, and IK:
 
-Edit the `material` section in `planner_config.json`:
+```bash
+python analyze_urdf_ik.py \
+  --robot-config-dir robotic_printing_platform/robots/robot_configs/franka_panda \
+  --samples 500 \
+  --target 0.45 0.0 0.25
+```
+
+Run `python run_pipeline.py --help` for the complete CLI reference.
+
+## Configuration
+
+`planner_config.json` separates the workcell and process settings from the
+robot package. CLI options can override the settings most useful during an
+experiment without changing the file.
+
+| Section | Controls |
+| --- | --- |
+| `robot.config_dir` | Robot package selected when `--robot config` is used. |
+| `bed` | Bed center in the robot base frame, normal, footprint, thickness, and minimum clearance. |
+| `nozzle_tcp` | Flange-to-nozzle translation and roll/pitch/yaw. A robot package can override these values. |
+| `material` | Material name, filament diameter, flow multiplier, and optional density. |
+| `path_preparation` | Maximum Cartesian segment length and collinear simplification tolerance. |
+| `ik` | Residual tolerances, iteration budget, damping, yaw sampling, local/global selection weights, stride, and waypoint cap. |
+
+### Change the material model
 
 ```json
 {
@@ -168,72 +290,176 @@ Edit the `material` section in `planner_config.json`:
 }
 ```
 
-The parser preserves raw G-code extrusion as `Move.e`, `Move.de`, and
-`Move.has_e`. The planner maps `de` into each waypoint's
-`extrusion_volume_mm3`, `extrusion_mass_g`, and `material`.
+The parser keeps raw extrusion as `Move.e`, `Move.de`, and `Move.has_e`. During
+path preparation, each positive `de` is converted into
+`extrusion_volume_mm3` and, when density is configured, `extrusion_mass_g`.
+Simplification and densification redistribute extrusion across new waypoints
+and fail fast if the total deposited filament is not conserved.
 
-## Changing Path Planning
+### Place the print bed
 
-Implement `robotic_printing_platform.path_planning.base.PathPlanningAlgorithm`
-and return a `PathPrep`-compatible object. The default implementation is
-`LayeredPathPlanner`, which groups print/travel runs, simplifies collinear print
-vertices, densifies long segments, places the path on the bed, and assigns a
-planar downward nozzle axis.
+The selected path is recentered in printer XY, converted from millimetres to
+metres, and translated by `bed.center_xyz_m`. For quick experiments, the bed
+center can be overridden from the CLI:
 
-## Changing Robot
+```bash
+python run_pipeline.py model.gcode \
+  --bed-x-m 0.45 --bed-y-m 0.0 --bed-z-m 0.10 \
+  --skip-ik
+```
 
-The common URDF planner is available from
-`robotic_printing_platform.robots.generic`:
+The current `LayeredPathPlanner` targets planar printing with the nozzle axis
+pointing down in the robot base frame. The bed normal and non-planar tilt hooks
+are configuration/extension points; arbitrary non-planar surface following is
+not implemented by the default planner.
+
+## Outputs
+
+The pipeline writes one subdirectory per selected robot beneath
+`--output-dir`.
+
+| Artifact | Description |
+| --- | --- |
+| `gcode_path.svg` | Top view of parsed print and travel moves in the source printer frame. |
+| `robot_waypoints.svg` | Top view after transforming the path into the robot base frame. |
+| `robot_waypoints_xz.svg` | Side view of base-frame Cartesian waypoints. |
+| `joint_trajectory.svg` | Joint position plot for the solved trajectory. |
+| `robot_print_trajectory.csv` | Flat trajectory with time, joints, derivatives, pose, layer, segment, extrusion, IK residual, iteration, and Jacobian fields. |
+| `robot_print_trajectory.json` | Structured form of the same trajectory and its IK summary. |
+| `trajectory_validation_report.json` | IK, timing, limits, singularity, collision-warning, and deposited-volume metrics. |
+| `ik_tolerance_sweep.json` | Convergence results when `--position-tolerance-sweep-mm` is requested. |
+| `replay_isaac.py` | Standalone Isaac Sim replay with time interpolation and visual deposition. |
+
+When an Isaac replay runs, it additionally writes:
+
+| Runtime artifact | Description |
+| --- | --- |
+| `joint_tracking.csv` | Timestamped desired and measured joint positions and errors. |
+| `joint_tracking_summary.json` | Maximum/RMS tracking error, thresholds, pass/fail state, and skipped deposition count. |
+| `joint_tracking.svg` | Dependency-free desired-versus-actual tracking plot. |
+
+## Isaac Sim replay
+
+The exporter generates a replay rather than depending on Isaac Sim from the
+main Python environment. The script loads the selected USD, initializes the
+robot at the first trajectory pose, waits for the articulation to settle, and
+then interpolates joint targets against the retimed trajectory clock.
+
+For custom Robot Assembler assets, the replay can select a `Physics=PhysX`
+variant and add a missing articulation-root marker in memory. The source USD is
+not modified. The repository's `UR5e_extruder.usd` also references
+`Mount_Extruder_Models/ur5_mount_extruder.usd`; keep that payload in its
+repository-relative location when moving the project.
+
+The supplied mount CAD uses 0.1 mm authored units. Replay detects the resulting
+ten-times overscale and corrects its maximum dimension from approximately
+1.48 m to 0.148 m before physics begins. Mount collision is off by default for
+trajectory/deposition visualization, and an explicit positive payload mass is
+recommended for calibrated dynamics.
+
+| Environment variable | Purpose |
+| --- | --- |
+| `RPP_ROBOT_USD` | Override the robot or assembly asset used by replay. |
+| `RPP_TRAJECTORY_CSV` | Override the trajectory CSV used by replay. |
+| `RPP_MOUNT_SCALE` | Explicit positive uniform scale for a different mount revision. |
+| `RPP_MOUNT_MASS_KG` | Measured positive mass of the complete mount/extruder payload. |
+| `RPP_ENABLE_MOUNT_COLLISION=1` | Enable mount collision when physical tool contact is intentionally under test. |
+
+Deposition is visual only. The generated script draws an orange bead segment
+for printing moves using `is_print`, `de`, and `extrusion_volume_mm3`; it does
+not model melting, pressure, cooling, adhesion, bead contact, or the mechanics
+of a growing part. Deposition points are skipped when joint error exceeds
+0.05 rad. Replay passes its tracking check only when maximum error is at most
+0.05 rad and RMS error is at most 0.02 rad.
+
+## Repository layout
+
+```text
+Robot-Arm-3D-Printing/
+├── run_pipeline.py                    # end-to-end CLI
+├── analyze_urdf_ik.py                 # direct FK/workspace/IK analysis
+├── visualize_pipeline.py              # dependency-free SVG diagnostics
+├── planner_config.json                # workcell, material, path, and IK settings
+├── requirements.txt                   # NumPy runtime dependency
+├── UR5e_extruder.usd                  # UR5e + mounted-extruder assembly
+├── Mount_Extruder_Models/             # mount USD/USDZ/STL payloads
+├── strong_universal_wall_hook_vcd.*   # included STL and sliced G-code example
+├── robotic_printing_platform/
+│   ├── config.py                      # validated configuration loading
+│   ├── gcode/                         # modal Cura/Marlin parser
+│   ├── extrusion/                     # material and extrusion conversion
+│   ├── path_planning/                 # planning interface + layered planner
+│   ├── robots/                        # generic solver and robot packages
+│   │   └── robot_configs/
+│   │       ├── franka_panda/
+│   │       ├── ur5/
+│   │       └── ur5e/
+│   ├── trajectory/                    # velocity/acceleration-aware retiming
+│   ├── validation/                    # quality, collision, and sweep reports
+│   └── exporters/                     # Isaac Sim bundle generation
+└── test_*.py                          # unit and end-to-end smoke tests
+```
+
+## Extending the platform
+
+### Add a robot
+
+Copy a package under
+`robotic_printing_platform/robots/robot_configs/`, replace `robot.urdf`, and
+edit `robot_config.json` with the model's link names, ordered planning joints,
+home pose, limits, reach, simulator asset, and any TCP or IK overrides. Point
+`planner_config.json -> robot.config_dir` at the new folder and run with
+`--robot config`.
+
+For a conventional serial URDF chain, no new solver class is required:
 
 ```python
 from robotic_printing_platform.robots.generic import URDFIKConfig, URDFRobotPlanner
 ```
 
-`URDFIKConfig` contains the URDF, base/end links, joint metadata and limits,
-TCP, bed/collision settings, and IK/global-optimization settings. The Panda
-and UR5 modules are thin robot-specific defaults layered over this generic
-planner. To add another serial arm, provide its configuration folder and
-construct a `URDFIKConfig`; implement `RobotPlanner` only when replacing the
-planning algorithm itself. The common planner loads its arm geometry from the folder named by
-`planner_config.json -> robot.config_dir`, wraps the NumPy URDF IK solver, and
-exports joint trajectories. To add another serial arm, copy one of the folders
-under `robotic_printing_platform/robots/robot_configs/`, replace `robot.urdf`,
-edit `robot_config.json`, then point `robot.config_dir` at the new folder. The
-built-in UR5 package uses Universal Robots' published 850 mm reach and
-six-joint planning chain; its sources are recorded in the package README.
+Implement `RobotPlanner` only when the robot requires a fundamentally different
+planning backend or trajectory contract.
 
-Important limitation: the included Franka IK is a lightweight NumPy
-implementation for planning and simulation export. For real printing, calibrate
-the nozzle TCP, bed transform, and robot model in your production stack before
-sending anything to hardware.
+### Add a path-planning strategy
 
-## Outputs
+Implement
+`robotic_printing_platform.path_planning.base.PathPlanningAlgorithm` and return
+a `PathPrep`-compatible result. A custom planner can change ordering,
+smoothing, non-planar normal assignment, deposition policy, or workpiece
+placement without modifying parsing, IK, validation, or export.
 
-The pipeline writes one directory per selected robot under `--output-dir`.
-With the default `--robot both`, files are separated into `panda/` and `ur5/`.
+### Add a process/material model
 
-- `gcode_path.svg`: top view of parsed print and travel moves.
-- `robot_waypoints.svg`: top view after placement in robot base coordinates.
-- `robot_waypoints_xz.svg`: side view in robot base XZ coordinates.
-- `joint_trajectory.svg`: per-step joint-motion plot after IK.
-- `robot_print_trajectory.csv`: joint trajectory plus position, feed,
-  extrusion, material, layer, segment, and IK residual columns.
-- `robot_print_trajectory.json`: same data in structured form.
-- `replay_isaac.py`: starter Isaac Sim replay script with visual deposition
-  markers for print moves.
+`MaterialProfile` is intentionally small and replaceable. The default model
+interprets `E` as filament length and derives volume from filament cross-section
+and flow multiplier. Pellet extrusion, paste deposition, or syringe processes
+can provide a different conversion while retaining the waypoint/export schema.
 
-## Isaac Visual Deposition
+## Validation and tests
 
-The generated `replay_isaac.py` now creates visual bead markers while the robot
-replays print waypoints. It reads `is_print`, `de`, and
-`extrusion_volume_mm3` from the exported CSV, then spawns orange spheres at
-deposition points.
+Run the complete test suite from the repository root:
 
-This is visual-only deposition. It does not simulate thermal behavior, flow,
-cooling, bead contact, or the mechanics of a growing part. The deposition
-settings live near the top of the generated Isaac script:
+```bash
+python -m unittest discover -v
+```
 
-- `DEPOSITION_ENABLED`
-- `DEPOSITION_EVERY_N_PRINT_POINTS`
-- `MAX_DEPOSITION_MARKERS`
-- `BEAD_RADIUS_M`
+The tests cover layered metadata and extrusion conservation, generic robot
+configuration, global yaw/IK selection, trajectory retiming, tolerance sweeps,
+Jacobian manipulability, capsule collision warnings, Isaac replay generation,
+and an end-to-end G-code smoke export for all bundled robot packages.
+
+## Current scope and limitations
+
+- The parser targets linear Cura/Marlin-style `G0` and `G1` motion. Arc and spline commands are not expanded.
+- The default path planner is planar and assigns a globally downward nozzle axis.
+- Collision checks use capsule and axis-aligned-box approximations and produce non-blocking warnings; they are not continuous collision proofs.
+- The NumPy IK solver is intended for planning, experimentation, and simulation export, not certified real-time robot control.
+- Isaac deposition is a visualization layer, not a thermo-mechanical material simulation.
+- Results depend on the accuracy of the URDF, bed transform, nozzle TCP, payload, and simulator asset.
+
+## Acknowledgements
+
+The platform builds on standard Cura/Marlin G-code conventions, URDF robot
+descriptions, NumPy numerical methods, and NVIDIA Isaac Sim. Robot-specific
+parameter sources and upstream model references are recorded alongside each
+package under `robotic_printing_platform/robots/robot_configs/`.
