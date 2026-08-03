@@ -248,6 +248,15 @@ def load_planner_config(
                 if material_data.get("density_g_cm3", 1.24) is None
                 else float(material_data.get("density_g_cm3", 1.24))
             ),
+            physx_particle_contact_offset_m=float(
+                material_data.get("physx_particle_contact_offset_m", 0.0005)
+            ),
+            physx_viscosity=float(material_data.get("physx_viscosity", 1000.0)),
+            physx_cohesion=float(material_data.get("physx_cohesion", 5.0)),
+            physx_adhesion=float(material_data.get("physx_adhesion", 10.0)),
+            physx_surface_tension=float(material_data.get("physx_surface_tension", 0.02)),
+            physx_friction=float(material_data.get("physx_friction", 1000.0)),
+            physx_damping=float(material_data.get("physx_damping", 0.99)),
         )
     )
     path_preparation = PathPreparationConfig(

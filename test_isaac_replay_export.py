@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from robotic_printing_platform.exporters.isaac import export_isaac_bundle
+from robotic_printing_platform.extrusion import MaterialProfile
 from robotic_printing_platform.robots.franka_panda import IKConfig, IKReport, RobotTrajectory, TrajectoryPoint
 
 
@@ -91,6 +92,24 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("DEPOSITION_MAX_JOINT_ERROR_RAD", source)
         self.assertIn("spawn_deposition_segment", source)
         self.assertIn("UsdGeom.BasisCurves.Define", source)
+        self.assertIn('DEPOSITION_MODE = os.environ.get("RPP_DEPOSITION_MODE", "particles")', source)
+        self.assertIn("class PhysxExtrusionEmitter", source)
+        self.assertIn("particleUtils.add_physx_particle_system", source)
+        self.assertIn("particleUtils.add_physx_particleset_points", source)
+        self.assertIn("particleUtils.add_pbd_particle_material", source)
+        self.assertIn("particleUtils.add_physx_particle_isosurface", source)
+        self.assertIn("PhysxSchema.PhysxSceneAPI.Apply", source)
+        self.assertIn("CreateEnableGPUDynamicsAttr().Set(True)", source)
+        self.assertIn('CreateBroadphaseTypeAttr().Set("GPU")', source)
+        self.assertIn("def create_print_bed", source)
+        self.assertIn("UsdPhysics.CollisionAPI.Apply(bed.GetPrim())", source)
+        self.assertIn("PARTICLE_VOLUME_MM3", source)
+        self.assertIn("volume_remainder_mm3", source)
+        self.assertIn('"deposited_particles"', source)
+        self.assertLess(
+            source.index("extend_array_attribute(simulation_points, positions)"),
+            source.index("extend_array_attribute(self.points.GetPointsAttr(), positions)"),
+        )
         self.assertIn("segment_start", source)
         self.assertNotIn("spawn_deposition_marker", source)
         self.assertIn("MAX_ACCEPTABLE_TRACKING_ERROR_RAD", source)
@@ -99,6 +118,57 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn('"skipped_deposition_points_due_to_tracking"', source)
         self.assertIn('os.environ.get("RPP_TRAJECTORY_CSV"', source)
         self.assertNotIn(str(bundle["csv"].resolve()), source)
+
+    def test_embeds_physical_material_and_bed_configuration(self):
+        point = TrajectoryPoint(
+            index=0,
+            q=np.zeros(7),
+            p=np.array([0.31, -0.04, 0.23]),
+            yaw=0.0,
+            is_print=True,
+            layer=0,
+            seg_id=0,
+            feed_m_s=0.01,
+            de=0.2,
+            material="test paste",
+            extrusion_volume_mm3=0.48,
+            extrusion_mass_g=0.0006,
+            pos_error_m=0.0,
+            rot_error_rad=0.0,
+            time_from_start_s=0.0,
+        )
+        trajectory = RobotTrajectory(
+            points=[point],
+            report=IKReport(True, 1, 1, 1, [], [], 0.0, 0.0),
+            config=IKConfig(),
+        )
+        material = MaterialProfile(
+            name="test paste",
+            density_g_cm3=1.6,
+            physx_particle_contact_offset_m=0.0007,
+            physx_viscosity=432.0,
+            physx_cohesion=6.0,
+            physx_adhesion=7.0,
+            physx_surface_tension=0.03,
+            physx_friction=8.0,
+            physx_damping=0.8,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = export_isaac_bundle(
+                trajectory,
+                Path(directory),
+                material_profile=material,
+                bed_center_xyz_m=(0.31, -0.04, 0.23),
+            )
+            source = bundle["isaac_script"].read_text(encoding="utf-8")
+
+        self.assertIn("BED_CENTER_M = (0.31, -0.04, 0.23)", source)
+        self.assertIn("MATERIAL_DENSITY_KG_M3 = 1600.0", source)
+        self.assertIn("PARTICLE_CONTACT_OFFSET_M = 0.0007", source)
+        self.assertIn("PARTICLE_VISCOSITY = 432.0", source)
+        self.assertIn("PARTICLE_COHESION = 6.0", source)
+        self.assertIn("PARTICLE_ADHESION = 7.0", source)
 
     def test_custom_robot_usd_overrides_configured_asset(self):
         point = TrajectoryPoint(

@@ -350,7 +350,7 @@ The pipeline writes one subdirectory per selected robot beneath
 | `robot_print_trajectory.json` | Structured form of the same trajectory and its IK summary. |
 | `trajectory_validation_report.json` | IK, timing, limits, singularity, collision-warning, and deposited-volume metrics. |
 | `ik_tolerance_sweep.json` | Convergence results when `--position-tolerance-sweep-mm` is requested. |
-| `replay_isaac.py` | Standalone Isaac Sim replay with time interpolation and visual deposition. |
+| `replay_isaac.py` | Standalone Isaac Sim replay with time interpolation and PhysX PBD material extrusion. |
 
 When an Isaac replay runs, it additionally writes:
 
@@ -386,13 +386,33 @@ recommended for calibrated dynamics.
 | `RPP_MOUNT_SCALE` | Explicit positive uniform scale for a different mount revision. |
 | `RPP_MOUNT_MASS_KG` | Measured positive mass of the complete mount/extruder payload. |
 | `RPP_ENABLE_MOUNT_COLLISION=1` | Enable mount collision when physical tool contact is intentionally under test. |
+| `RPP_DEPOSITION_MODE=particles` | PhysX PBD extrusion (default); use `visual` for the previous curve-only preview. |
+| `RPP_MAX_DEPOSITION_PARTICLES` | Maximum particles in the shared particle set; default `250000`. |
+| `RPP_PARTICLE_ISOSURFACE=1` | Render the physical particles as a continuous surface; disable to inspect/debug particles. |
 
-Deposition is visual only. The generated script draws an orange bead segment
-for printing moves using `is_print`, `de`, and `extrusion_volume_mm3`; it does
-not model melting, pressure, cooling, adhesion, bead contact, or the mechanics
-of a growing part. Deposition points are skipped when joint error exceeds
-0.05 rad. Replay passes its tracking check only when maximum error is at most
-0.05 rad and RMS error is at most 0.02 rad.
+Physical deposition is enabled by default. The generated replay creates a GPU
+PhysX PBD particle system, a viscous/cohesive/adhesive material, and a static
+collider at the configured print-bed pose. Extruded volume is converted to a
+particle count with a carried fractional remainder, so discretization does not
+systematically lose material between trajectory rows. New material is appended
+to one shared particle set, and smoothing plus an isosurface make the simulated
+particles render as a continuous bead.
+
+The starting PBD parameters live under `material` in `planner_config.json`:
+`physx_particle_contact_offset_m`, `physx_viscosity`, `physx_cohesion`,
+`physx_adhesion`, `physx_surface_tension`, `physx_friction`, and
+`physx_damping`. Density is converted from `density_g_cm3` to SI units. These
+parameters must be calibrated against measured bead width, height, spreading,
+and sag for a particular material and nozzle. A smaller contact offset increases
+resolution and particle count rapidly.
+
+This model provides material mass, gravity, particle-particle interaction,
+adhesion, and collision with the print bed. PhysX PBD does not model nozzle
+temperature, heat transfer, crystallization, curing chemistry, or a true
+molten-to-solid phase transition. Use `RPP_DEPOSITION_MODE=visual` when a fast
+trajectory preview is more important than material physics. Deposition is
+skipped when joint error exceeds 0.05 rad. Replay passes its tracking check only
+when maximum error is at most 0.05 rad and RMS error is at most 0.02 rad.
 
 ## Repository layout
 
@@ -476,7 +496,7 @@ and an end-to-end G-code smoke export for all bundled robot packages.
 - The default path planner is planar and assigns a globally downward nozzle axis.
 - Collision checks use capsule and axis-aligned-box approximations and produce non-blocking warnings; they are not continuous collision proofs.
 - The NumPy IK solver is intended for planning, experimentation, and simulation export, not certified real-time robot control.
-- Isaac deposition is a visualization layer, not a thermo-mechanical material simulation.
+- Isaac deposition uses a calibrated PBD approximation; it is not a thermo-mechanical phase-change simulation.
 - Results depend on the accuracy of the URDF, bed transform, nozzle TCP, payload, and simulator asset.
 
 ## Acknowledgements

@@ -142,7 +142,13 @@ def run(
             print()
 
             print("=== Stage 4: export ===")
-            bundle = export_isaac_bundle(traj, robot_out, robot_usd_path=isaac_usd)
+            bundle = export_isaac_bundle(
+                traj,
+                robot_out,
+                robot_usd_path=isaac_usd,
+                material_profile=robot_cfg.material.profile,
+                bed_center_xyz_m=(bed_x, bed_y, bed_z),
+            )
             bundle["validation_report"] = validation_path
             bundles[robot_cfg.robot.model] = bundle
             for name, file_path in bundle.items():

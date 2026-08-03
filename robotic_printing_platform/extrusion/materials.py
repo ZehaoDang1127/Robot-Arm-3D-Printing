@@ -18,6 +18,13 @@ class MaterialProfile:
     filament_diameter_mm: float = 1.75
     flow_multiplier: float = 1.0
     density_g_cm3: float | None = 1.24
+    physx_particle_contact_offset_m: float = 0.0005
+    physx_viscosity: float = 1000.0
+    physx_cohesion: float = 5.0
+    physx_adhesion: float = 10.0
+    physx_surface_tension: float = 0.02
+    physx_friction: float = 1000.0
+    physx_damping: float = 0.99
 
     @property
     def filament_area_mm2(self) -> float:
