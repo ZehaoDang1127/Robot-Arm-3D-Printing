@@ -554,22 +554,6 @@ shear-thinning hydrogel extrusion and direct wound deposition are credible
 research targets; they do not establish a numerical mapping from rheometer data
 to PhysX PBD coefficients.
 
-The journal impact factors below are the values displayed by the publishers on
-3 August 2026. They document source selection only and must not be interpreted
-as validation of an individual parameter or article.
-
-| Journal used here | Publisher-listed impact factor | Evidence role |
-| --- | ---: | --- |
-| *Advanced Functional Materials* | `19.9` | Alginate-based extrusion rheology, printability, and post-print stability [2]. |
-| *Advanced Science* | `14.1` | Programmable hydrogel extrusion directly onto skin wounds [3]. |
-| *Acta Biomaterialia* | `9.6` | Measured alginate-bioink density and rheology [4]. |
-| *Polymers* | `5.8` | Exact Al1Ch1.0 composition and 400 micrometre nozzle [1]. |
-
-The first three sources are stronger journal-level anchors for the general
-material and application assumptions. Liu et al. [1] remains necessary because
-none of the higher-impact papers studies the exact Al1Ch1.0 formulation used by
-this preset.
-
 ### Evidence boundaries
 
 | Evidence source | What it supports | What it does not support |
