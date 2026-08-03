@@ -15,7 +15,9 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class MaterialProfile:
     name: str = "PLA"
+    extrusion_mode: str = "filament_length"
     filament_diameter_mm: float = 1.75
+    syringe_inner_diameter_mm: float | None = None
     flow_multiplier: float = 1.0
     density_g_cm3: float | None = 1.24
     physx_particle_contact_offset_m: float = 0.0005
@@ -26,13 +28,41 @@ class MaterialProfile:
     physx_friction: float = 1000.0
     physx_damping: float = 0.99
 
+    def __post_init__(self) -> None:
+        supported_modes = {"filament_length", "volumetric", "syringe_plunger"}
+        if self.extrusion_mode not in supported_modes:
+            raise ValueError(
+                f"extrusion_mode must be one of {sorted(supported_modes)}, "
+                f"got {self.extrusion_mode!r}"
+            )
+        if self.flow_multiplier <= 0.0 or not math.isfinite(self.flow_multiplier):
+            raise ValueError("flow_multiplier must be a positive finite number")
+        if self.extrusion_mode == "filament_length":
+            if self.filament_diameter_mm <= 0.0 or not math.isfinite(self.filament_diameter_mm):
+                raise ValueError("filament_diameter_mm must be a positive finite number")
+        if self.extrusion_mode == "syringe_plunger":
+            diameter = self.syringe_inner_diameter_mm
+            if diameter is None or diameter <= 0.0 or not math.isfinite(diameter):
+                raise ValueError(
+                    "syringe_inner_diameter_mm must be a positive finite number "
+                    "for syringe_plunger extrusion"
+                )
+
     @property
     def filament_area_mm2(self) -> float:
         radius = self.filament_diameter_mm * 0.5
         return math.pi * radius * radius
 
     def volume_mm3(self, e_delta_mm: float) -> float:
-        return max(0.0, e_delta_mm) * self.filament_area_mm2 * self.flow_multiplier
+        positive_delta = max(0.0, e_delta_mm)
+        if self.extrusion_mode == "volumetric":
+            # In volumetric mode, one G-code E unit is one cubic millimetre.
+            return positive_delta * self.flow_multiplier
+        if self.extrusion_mode == "syringe_plunger":
+            radius = float(self.syringe_inner_diameter_mm) * 0.5
+            plunger_area_mm2 = math.pi * radius * radius
+            return positive_delta * plunger_area_mm2 * self.flow_multiplier
+        return positive_delta * self.filament_area_mm2 * self.flow_multiplier
 
     def mass_g(self, e_delta_mm: float) -> float | None:
         if self.density_g_cm3 is None:

@@ -241,7 +241,13 @@ def load_planner_config(
     material = MaterialConfig(
         profile=MaterialProfile(
             name=str(material_data.get("name", "PLA")),
+            extrusion_mode=str(material_data.get("extrusion_mode", "filament_length")),
             filament_diameter_mm=float(material_data.get("filament_diameter_mm", 1.75)),
+            syringe_inner_diameter_mm=(
+                None
+                if material_data.get("syringe_inner_diameter_mm") is None
+                else float(material_data["syringe_inner_diameter_mm"])
+            ),
             flow_multiplier=float(material_data.get("flow_multiplier", 1.0)),
             density_g_cm3=(
                 None

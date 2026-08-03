@@ -295,7 +295,7 @@ experiment without changing the file.
 | `robot.config_dir` | Robot package selected when `--robot config` is used. |
 | `bed` | Bed center in the robot base frame, normal, footprint, thickness, and minimum clearance. |
 | `nozzle_tcp` | Flange-to-nozzle translation and roll/pitch/yaw. A robot package can override these values. |
-| `material` | Material name, filament diameter, flow multiplier, and optional density. |
+| `material` | Material name, extrusion interpretation, flow multiplier, density, and PhysX PBD coefficients. |
 | `path_preparation` | Maximum Cartesian segment length and collinear simplification tolerance. |
 | `ik` | Residual tolerances, iteration budget, damping, yaw sampling, local/global selection weights, stride, and waypoint cap. |
 
@@ -305,6 +305,7 @@ experiment without changing the file.
 {
   "material": {
     "name": "PLA",
+    "extrusion_mode": "filament_length",
     "filament_diameter_mm": 1.75,
     "flow_multiplier": 1.0,
     "density_g_cm3": 1.24
@@ -317,6 +318,48 @@ path preparation, each positive `de` is converted into
 `extrusion_volume_mm3` and, when density is configured, `extrusion_mass_g`.
 Simplification and densification redistribute extrusion across new waypoints
 and fail fast if the total deposited filament is not conserved.
+
+`extrusion_mode` controls how a positive G-code `E` delta becomes volume:
+
+| Mode | Meaning of one `E` unit |
+| --- | --- |
+| `filament_length` | One millimetre of feedstock filament; volume uses `filament_diameter_mm`. |
+| `volumetric` | One cubic millimetre of deposited material. |
+| `syringe_plunger` | One millimetre of plunger travel; volume uses `syringe_inner_diameter_mm`. |
+
+### Research hydrogel preset
+
+`planner_config_hydrogel.json` provides one fixed research simulation profile:
+the Al1Ch1.0 alginate-chitosan polyion-complex ink reported by Liu et al. [1].
+The reference ink used 2.0 g sodium alginate and 1.663 g chitosan per 20 mL
+water, a 1:1 alginate-to-chitosan molar ratio, and a 400 micrometre nozzle. It
+uses volumetric extrusion here, so its input G-code must express `E` in cubic
+millimetres. Do not apply it unchanged to ordinary Cura filament G-code, whose
+`E` values are normally filament length.
+
+The preset is supported by several papers with different evidence roles rather
+than treating one paper as a complete material model. Gao et al. [2] provide a
+higher-impact experimental reference for shear-thinning alginate-based
+extrusion, viscoelasticity, self-healing, extrusion pressure, and print
+fidelity. Wang et al. [3] demonstrate programmable extrusion of hydrogel bioinks
+directly onto skin wounds, including rheology and extrusion/strip-size studies.
+Jia et al. [4] provide the measured alginate-bioink density used as a proxy.
+Those studies use different hydrogel formulations and do not supply PhysX PBD
+coefficients for Al1Ch1.0.
+
+```bash
+python run_pipeline.py hydrogel_volumetric.gcode \
+  --config planner_config_hydrogel.json \
+  --robot ur5e \
+  --isaac-usd UR5e_extruder.usd \
+  --output-dir outputs/hydrogel
+```
+
+The paper sprayed 0.5 mol/L HCl after each deposited layer to induce
+poly-complexation. The current PhysX replay simulates extrusion and deposition,
+but not that chemical cross-linking step. The profile is not a validated
+clinical formulation. Isaac Sim does not establish sterility, cytotoxicity,
+sensitization, antimicrobial efficacy, or wound-healing performance.
 
 ### Place the print bed
 
@@ -422,6 +465,7 @@ Robot-Arm-3D-Printing/
 ├── analyze_urdf_ik.py                 # direct FK/workspace/IK analysis
 ├── visualize_pipeline.py              # dependency-free SVG diagnostics
 ├── planner_config.json                # workcell, material, path, and IK settings
+├── planner_config_hydrogel.json       # research-only volumetric hydrogel preset
 ├── requirements.txt                   # NumPy runtime dependency
 ├── UR5e_extruder.usd                  # UR5e + mounted-extruder assembly
 ├── Mount_Extruder_Models/             # mount USD/USDZ/STL payloads
@@ -472,10 +516,10 @@ placement without modifying parsing, IK, validation, or export.
 
 ### Add a process/material model
 
-`MaterialProfile` is intentionally small and replaceable. The default model
-interprets `E` as filament length and derives volume from filament cross-section
-and flow multiplier. Pellet extrusion, paste deposition, or syringe processes
-can provide a different conversion while retaining the waypoint/export schema.
+`MaterialProfile` supports filament-length, direct-volumetric, and syringe-plunger
+interpretations of `E`. This lets paste and hydrogel processes retain the same
+waypoint/export schema without pretending their feedstock is thermoplastic
+filament.
 
 ## Validation and tests
 
@@ -498,6 +542,75 @@ and an end-to-end G-code smoke export for all bundled robot packages.
 - The NumPy IK solver is intended for planning, experimentation, and simulation export, not certified real-time robot control.
 - Isaac deposition uses a calibrated PBD approximation; it is not a thermo-mechanical phase-change simulation.
 - Results depend on the accuracy of the URDF, bed transform, nozzle TCP, payload, and simulator asset.
+
+## References and parameter provenance
+
+`planner_config_hydrogel.json` intentionally represents only the Al1Ch1.0
+formulation from Liu et al. [1]. Its composition and nozzle size come from that
+paper. The experimental literature is then triangulated using a higher-impact
+alginate extrusion study [2], an in-situ skin-wound extrusion study [3], and a
+measured alginate-bioink density study [4]. These papers establish that
+shear-thinning hydrogel extrusion and direct wound deposition are credible
+research targets; they do not establish a numerical mapping from rheometer data
+to PhysX PBD coefficients.
+
+The journal impact factors below are the values displayed by the publishers on
+3 August 2026. They document source selection only and must not be interpreted
+as validation of an individual parameter or article.
+
+| Journal used here | Publisher-listed impact factor | Evidence role |
+| --- | ---: | --- |
+| *Advanced Functional Materials* | `19.9` | Alginate-based extrusion rheology, printability, and post-print stability [2]. |
+| *Advanced Science* | `14.1` | Programmable hydrogel extrusion directly onto skin wounds [3]. |
+| *Acta Biomaterialia* | `9.6` | Measured alginate-bioink density and rheology [4]. |
+| *Polymers* | `5.8` | Exact Al1Ch1.0 composition and 400 micrometre nozzle [1]. |
+
+The first three sources are stronger journal-level anchors for the general
+material and application assumptions. Liu et al. [1] remains necessary because
+none of the higher-impact papers studies the exact Al1Ch1.0 formulation used by
+this preset.
+
+### Evidence boundaries
+
+| Evidence source | What it supports | What it does not support |
+| --- | --- | --- |
+| Liu et al. [1] | Al1Ch1.0 formulation, preparation, shear-thinning behavior, 400 micrometre extrusion, and acid-induced post-deposition complexation. | Density or any Isaac Sim/PhysX coefficient. |
+| Gao et al. [2] | Experimental characterization of an alginate-based extrusion bioink: viscosity versus shear rate, storage/loss moduli, self-healing, extrusion pressure, and printing accuracy. | The Al1Ch1.0 chemistry; the study instead uses AlgMA with methacrylated epsilon-polylysine. |
+| Wang et al. [3] | Programmable extrusion, rheology, extrusion-rate/strip-width response, and direct in-situ skin-wound deposition in a research setting. | The Al1Ch1.0 chemistry; the study uses laponite-based and granular hydrogel bioinks. |
+| Jia et al. [4] | An approximately `1.05 g/cm3` measured density proxy and rheological context for printable alginate bioinks. | Density of the exact Al1Ch1.0 ink. |
+| NVIDIA references [5-7] | PhysX particle-system behavior, numerical offsets, and the starting PBD solver values. | Physical hydrogel properties or wound-healing efficacy. |
+
+The PhysX PBD coefficients below are therefore solver controls. They must not be
+interpreted as laboratory properties such as viscosity in Pa s or surface
+tension in N/m.
+
+| Preset field | Value | Provenance and intended use |
+| --- | ---: | --- |
+| `density_g_cm3` | `1.05` | Literature-backed proxy for concentrated printable alginate bioinks [4]. Liu et al. did not report density for Al1Ch1.0, so replace this proxy with a measurement if the ink is prepared. |
+| `physx_viscosity` | `1000` | Starting solver value adapted from NVIDIA's PhysX **Paint Ball Emitter** demo [5]. It is dimensionless and is not `1000 Pa s` [7]. |
+| `physx_cohesion` | `5` | Starting solver value adapted from NVIDIA's Paint Ball Emitter demo [5], not a measured Al1Ch1.0 property. |
+| `physx_surface_tension` | `0.02` | Starting solver value adapted from NVIDIA's Paint Ball Emitter demo [5], not a value in N/m [7]. |
+| `physx_friction` | `1000` | High-friction solver value adapted from NVIDIA's Paint Ball Emitter demo [5], not a wet-contact measurement. |
+| `physx_damping` | `0.99` | Numerical damping adapted from NVIDIA's Paint Ball Emitter demo [5]. |
+| `physx_adhesion` | `15` | Project heuristic chosen to produce visibly adhesive deposition; no experimental source. Calibrate it against wet strand/bed tests. |
+| `physx_particle_contact_offset_m` | `0.0002` | Numerical resolution selected for the paper's 0.4 mm nozzle using NVIDIA's offset formulas [6]. It is not a material property and increases particle count substantially. |
+| `flow_multiplier` | `1.0` | Neutral process default. Determine the real value by weighing or volumetrically measuring dispensed material. |
+| `extrusion_mode` | `volumetric` | G-code convention: one positive `E` unit is one cubic millimetre. This is a process interpretation, not a physical property. |
+
+This profile is therefore suitable for demonstrating one plausible
+alginate-chitosan deposition case. It is not a quantitative rheology model:
+Al1Ch1.0 is shear-thinning and chemically gels after deposition, whereas the
+current PhysX PBD material uses fixed solver coefficients.
+
+1. Q. Liu, Q. Li, S. Xu, Q. Zheng, and X. Cao, ["Preparation and Properties of 3D Printed Alginate-Chitosan Polyion Complex Hydrogels for Tissue Engineering," *Polymers*, 10(6), 664 (2018)](https://doi.org/10.3390/polym10060664).
+2. C. Gao et al., ["A Small-Molecule Polycationic Crosslinker Boosts Alginate-Based Bioinks for Extrusion Bioprinting," *Advanced Functional Materials*, 34(9), 2310369 (2024)](https://doi.org/10.1002/adfm.202310369).
+3. C. Wang et al., ["A Programmable Handheld Extrusion-Based Bioprinting Platform for In Situ Skin Wounds Dressing: Balance Mobility and Customizability," *Advanced Science*, 11(46), 2405823 (2024)](https://doi.org/10.1002/advs.202405823).
+4. J. Jia et al., ["Engineering alginate as bioink for bioprinting," *Acta Biomaterialia*, 10(10), 4323-4331 (2014)](https://doi.org/10.1016/j.actbio.2014.06.034).
+5. NVIDIA Omniverse PhysX, [Fluid Ball/Paint Ball Emitter demo source](https://github.com/NVIDIA-Omniverse/PhysX/blob/main/omni/extensions/ux/source/omni.physx.demos/python/scenes/FluidBallEmitterDemo.py).
+6. NVIDIA Omniverse, [PhysX particle simulation and offset documentation](https://docs.omniverse.nvidia.com/kit/docs/omni_physics/latest/dev_guide/particles/particles.html).
+7. NVIDIA Omniverse, [PhysX PBD material API reference](https://docs.omniverse.nvidia.com/kit/docs/usdrt/latest/_apidocs/classusdrt_1_1PhysxSchemaPhysxPBDMaterialAPI.html).
+
+Journal-metric sources: [*Advanced Functional Materials*](https://advanced.onlinelibrary.wiley.com/journal/16163028), [*Advanced Science*](https://advanced.onlinelibrary.wiley.com/journal/21983844), [*Acta Biomaterialia*](https://www.sciencedirect.com/journal/acta-biomaterialia), and [*Polymers*](https://www.mdpi.com/journal/polymers/imprint).
 
 ## Acknowledgements
 
