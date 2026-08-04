@@ -1,4 +1,4 @@
-; Hydrogel volumetric extrusion demo
+; Material-profile-driven volumetric extrusion demo
 ; E units are cubic millimetres, not filament length.
 ; Nominal deposited cross-section: 0.4 mm x 0.4 mm.
 ; Patch footprint: 25 mm x 15 mm, 1 mm line spacing.

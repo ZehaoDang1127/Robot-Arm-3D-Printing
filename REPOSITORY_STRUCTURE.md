@@ -1,121 +1,72 @@
-# Repository Structure
+# Repository structure
 
 ```text
 robotic-printing-platform/
-├── README.md
-├── REPOSITORY_STRUCTURE.md
-├── requirements.txt
-├── planner_config.json
-├── material_profiles/
-│   ├── alginate_chitosan_pic_al1ch1_research.json
-│   └── pla.json
-├── run_pipeline.py
-├── visualize_pipeline.py
-├── analyze_urdf_ik.py
-├── strong_universal_wall_hook_vcd.gcode
-├── strong_universal_wall_hook_vcd.stl
-├── robotic_printing_platform/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── gcode/
-│   │   ├── __init__.py
-│   │   └── parser.py
-│   ├── extrusion/
-│   │   ├── __init__.py
-│   │   └── materials.py
-│   ├── path_planning/
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   └── layered.py
-│   ├── robots/
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   ├── franka_panda.py
-│   │   ├── urdf_kinematics.py
-│   │   └── robot_configs/
-│   │       └── franka_panda/
-│   │           ├── README.md
-│   │           ├── robot_config.json
-│   │           └── robot.urdf
-│   └── exporters/
-│       ├── __init__.py
-│       └── isaac.py
-└── verify_sim/
-    ├── franka_print_trajectory.csv
-    ├── franka_print_trajectory.json
-    ├── replay_isaac.py
-    ├── gcode_path.svg
-    ├── robot_waypoints.svg
-    ├── robot_waypoints_xz.svg
-    └── joint_trajectory.svg
+|-- README.md
+|-- REPOSITORY_STRUCTURE.md
+|-- requirements.txt
+|-- planner_config.json
+|-- material_profiles/
+|   |-- alginate_chitosan_pic_al1ch1_research.json
+|   `-- pla.json
+|-- isaac_demo/
+|   |-- README.md
+|   |-- volumetric_patch.gcode
+|   `-- ur5e/
+|       |-- replay_isaac.py
+|       |-- resolved_material_profile.json
+|       |-- robot_print_trajectory.csv
+|       |-- robot_print_trajectory.json
+|       `-- trajectory_validation_report.json
+|-- run_pipeline.py
+|-- visualize_pipeline.py
+|-- analyze_urdf_ik.py
+|-- robotic_printing_platform/
+|   |-- config.py
+|   |-- gcode/
+|   |-- extrusion/
+|   |-- path_planning/
+|   |-- trajectory/
+|   |-- validation/
+|   |-- exporters/
+|   `-- robots/
+|       `-- robot_configs/
+|           |-- franka_panda/
+|           |-- ur5/
+|           `-- ur5e/
+`-- test_*.py
 ```
 
-## Top-Level Files
+## Universal material workflow
 
-- `README.md` documents setup, usage, modular extension points, and Isaac visual deposition.
-- `REPOSITORY_STRUCTURE.md` describes the repository layout.
-- `requirements.txt` lists Python package dependencies.
-- `planner_config.json` stores robot, bed, nozzle, path planning, IK, and the active material profile ID.
-- `material_profiles/` stores independently selectable material/process properties and PhysX calibration values.
-- `run_pipeline.py` is the main CLI entry point for parsing, planning, IK, export, and visualization.
-- `visualize_pipeline.py` writes SVG diagnostics for G-code, robot waypoints, XZ waypoint side view, and joint motion.
-- `analyze_urdf_ik.py` runs direct robot-folder FK, workspace, and IK analysis.
-- `robotic_printing_platform/robots/robot_configs/` stores swappable robot packages. Replace the folder contents or point `robot.config_dir` at another folder to change robots.
-- `strong_universal_wall_hook_vcd.gcode` is the sample sliced print path.
-- `strong_universal_wall_hook_vcd.stl` is the sample source model.
+The pipeline, robot planner, Isaac exporter, and replay structure are not tied
+to a named material. A material is selected through `--material PROFILE_ID` or
+`planner_config.json`, loaded from `material_profiles/`, and copied into the
+generated bundle as `resolved_material_profile.json`.
 
-## Python Package
+`isaac_demo/` is the stable, ready-to-run example location. Its committed
+snapshot uses one profile, but regenerating it with another compatible profile
+does not change the directory layout or launch command. Input G-code must use
+the extrusion convention declared by the selected profile.
 
-### `robotic_printing_platform/gcode/`
+## Main components
 
-Parses Cura/Marlin-style G-code into motion primitives.
+- `run_pipeline.py` parses G-code, prepares paths, solves robot IK, validates
+  trajectories, and exports simulator artifacts.
+- `material_profiles/` contains independently selectable material/process
+  profiles. Adding a material does not require changing the pipeline code.
+- `robotic_printing_platform/extrusion/materials.py` validates profiles and
+  converts G-code extrusion values to volume and mass without hard-coding a
+  selected material.
+- `robotic_printing_platform/exporters/isaac.py` generates a standalone Isaac
+  Sim replay with the selected profile embedded.
+- `isaac_demo/ur5e/resolved_material_profile.json` identifies the exact profile
+  used for the committed replay snapshot.
 
-- `parser.py` handles `X/Y/Z`, feedrate `F`, extrusion `E`, layer comments, absolute/relative positioning, retractions, and travel moves.
+## Generated outputs
 
-### `robotic_printing_platform/extrusion/`
-
-Keeps extrusion and material behavior modular.
-
-- `materials.py` validates generic `MaterialProfile` data loaded from JSON and converts G-code `E` deltas into volume and optional mass. It contains no selected material identity.
-
-### `robotic_printing_platform/path_planning/`
-
-Converts parsed G-code into robot-frame waypoints.
-
-- `base.py` defines the `PathPlanningAlgorithm` interface.
-- `layered.py` implements the default layer-by-layer planner, waypoint densification, bed placement, nozzle pose assignment, and extrusion metadata transfer.
-
-### `robotic_printing_platform/robots/`
-
-Converts robot-frame waypoints into robot-specific motion.
-
-- `base.py` defines the `RobotPlanner` interface.
-- `franka_panda.py` implements the default URDF-backed forward kinematics, IK, yaw sampling, trajectory export data, and `FrankaPandaPlanner`.
-- `urdf_kinematics.py` provides general serial-chain URDF loading, FK, Jacobians, workspace sampling, and damped least-squares IK.
-
-### `robotic_printing_platform/exporters/`
-
-Writes simulator/runtime outputs.
-
-- `isaac.py` exports CSV/JSON trajectories and generates `replay_isaac.py` for Isaac Sim, including visual deposition markers.
-
-## Generated Verification Outputs
-
-`verify_sim/` contains a small tracked simulation/export sample:
-
-- `robot_print_trajectory.csv` and `.json` contain the generated robot trajectory and extrusion fields.
-- `replay_isaac.py` replays Franka motion in Isaac Sim and creates visual deposited material markers.
-- `gcode_path.svg` shows the parsed G-code path.
-- `robot_waypoints.svg` shows robot waypoints in base-frame XY.
-- `robot_waypoints_xz.svg` shows robot waypoints in base-frame XZ.
-- `joint_trajectory.svg` shows per-step joint motion.
-
-## Ignored Generated Outputs
-
-The following all-layer output folders are intentionally ignored because they are large and reproducible:
-
-```text
-verify_all_layers/
-verify_all_layers_preview/
-outputs*/
-```
+Normal pipeline output is written under the directory supplied by
+`--output-dir` and then separated by robot model. Directories matching
+`outputs*` are ignored because their contents are reproducible and may be
+large. The smaller `isaac_demo/` bundle is intentionally tracked so the lab
+desktop has an immediately launchable example.

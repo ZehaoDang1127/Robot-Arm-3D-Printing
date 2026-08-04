@@ -208,6 +208,20 @@ Launch the generated script with Isaac Sim's Python on Windows:
 & '<ISAAC_SIM_ROOT>\python.bat' '<REPOSITORY_ROOT>\outputs\ur5e_extruder\ur5e\replay_isaac.py'
 ```
 
+> **HAIM lab desktop — universal Isaac demo:** Isaac Sim is installed at
+> `C:\isaac-sim`, and the repository is located at
+> `C:\Users\haim_\Desktop\Robot-Arm-3D-Printing`. Run the following commands
+> in PowerShell:
+
+```powershell
+cd "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing"
+git pull
+$env:RPP_DEPOSITION_MODE = "particles"
+$env:RPP_PARTICLE_ISOSURFACE = "0"
+cd "C:\isaac-sim"
+.\python.bat "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\isaac_demo\ur5e\replay_isaac.py"
+```
+
 The replay resolves the trajectory CSV and custom USD relative to its own
 location, so the output and repository assets can be moved together without
 embedding machine-specific paths.
