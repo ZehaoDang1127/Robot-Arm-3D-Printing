@@ -14,13 +14,18 @@ installation path on that computer:
 
 ```powershell
 $env:RPP_DEPOSITION_MODE = "particles"
-$env:RPP_PARTICLE_ISOSURFACE = "1"
+$env:RPP_PARTICLE_ISOSURFACE = "0"
 & "C:\PATH\TO\ISAAC_SIM\python.bat" ".\hydrogel_demo\ur5e\replay_isaac.py"
 ```
 
 The replay console prints the selected material profile, extrusion mode,
 hydrogel density, and particle-system settings at startup. The complete
 resolved profile is also saved in `ur5e/resolved_material_profile.json`.
+
+The safe launch keeps the optional isosurface renderer off while retaining the
+full PhysX PBD particle simulation. After confirming that Isaac Sim's built-in
+**Fluid Isosurface** demo works on the lab GPU and driver, you can opt into the
+continuous-surface renderer with `RPP_PARTICLE_ISOSURFACE=1`.
 
 ## Validation summary
 
@@ -31,5 +36,6 @@ resolved profile is also saved in `ur5e/resolved_material_profile.json`.
 - 64 mm³ total deposited volume
 - 40.35 s estimated replay duration
 
-This is a particle/isosurface approximation of hydrogel deposition in PhysX;
-it is not a molecular or chemical curing simulation.
+This is a PhysX PBD particle approximation of hydrogel deposition; the optional
+isosurface affects rendering only. It is not a molecular or chemical curing
+simulation.

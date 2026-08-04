@@ -101,7 +101,7 @@ PARTICLE_SURFACE_TENSION = {particle_surface_tension!r}
 PARTICLE_FRICTION = {particle_friction!r}
 PARTICLE_DAMPING = {particle_damping!r}
 PARTICLE_ISOSURFACE_ENABLED = os.environ.get(
-    "RPP_PARTICLE_ISOSURFACE", "1"
+    "RPP_PARTICLE_ISOSURFACE", "0"
 ).strip().lower() in {{"1", "true", "yes", "on"}}
 SETTLING_TIME_S = 2.0
 INITIALIZATION_TIMEOUT_S = 30.0
@@ -697,8 +697,16 @@ if DEPOSITION_ENABLED and DEPOSITION_MODE == "particles":
     print(
         f"PhysX PBD extrusion: estimated {{estimated_particles}} particles; "
         f"capacity {{MAX_DEPOSITION_PARTICLES}}; density "
-        f"{{MATERIAL_DENSITY_KG_M3:.6g}} kg/m^3"
+        f"{{MATERIAL_DENSITY_KG_M3:.6g}} kg/m^3; material "
+        f"{{MATERIAL_PROFILE_ID}}"
     )
+    if PARTICLE_ISOSURFACE_ENABLED:
+        print("particle isosurface: enabled (optional render-only GPU path)")
+    else:
+        print(
+            "particle isosurface: disabled "
+            "(safe default; PBD physics remains enabled)"
+        )
 print(f"robot asset: {{ROBOT_USD}}")
 print(f"articulation root: {{ARTICULATION_PRIM}}")
 robot = SingleArticulation(prim_path=ARTICULATION_PRIM, name="replay_robot")

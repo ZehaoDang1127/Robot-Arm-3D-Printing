@@ -455,15 +455,18 @@ recommended for calibrated dynamics.
 | `RPP_ENABLE_MOUNT_COLLISION=1` | Enable mount collision when physical tool contact is intentionally under test. |
 | `RPP_DEPOSITION_MODE=particles` | PhysX PBD extrusion (default); use `visual` for the previous curve-only preview. |
 | `RPP_MAX_DEPOSITION_PARTICLES` | Maximum particles in the shared particle set; default `250000`. |
-| `RPP_PARTICLE_ISOSURFACE=1` | Render the physical particles as a continuous surface; disable to inspect/debug particles. |
+| `RPP_PARTICLE_ISOSURFACE=1` | Opt into the render-only continuous-surface GPU path. It is off by default for stability; PBD material physics remains active. |
 
 Physical deposition is enabled by default. The generated replay creates a GPU
 PhysX PBD particle system, a viscous/cohesive/adhesive material, and a static
 collider at the configured print-bed pose. Extruded volume is converted to a
 particle count with a carried fractional remainder, so discretization does not
 systematically lose material between trajectory rows. New material is appended
-to one shared particle set, and smoothing plus an isosurface make the simulated
-particles render as a continuous bead.
+to one shared particle set. Particle smoothing remains enabled. The optional
+isosurface can make particles render as a continuous bead, but it does not
+change the underlying PBD fluid simulation and is disabled by default because
+some GPU/driver combinations fail in its sparse-grid CUDA kernels. NVIDIA also
+lists isosurface as render-only and potentially memory-leaking [8].
 
 The starting PBD parameters live under `material` in `planner_config.json`:
 `physx_particle_contact_offset_m`, `physx_viscosity`, `physx_cohesion`,
@@ -623,6 +626,7 @@ current PhysX PBD material uses fixed solver coefficients.
 5. NVIDIA Omniverse PhysX, [Fluid Ball/Paint Ball Emitter demo source](https://github.com/NVIDIA-Omniverse/PhysX/blob/main/omni/extensions/ux/source/omni.physx.demos/python/scenes/FluidBallEmitterDemo.py).
 6. NVIDIA Omniverse, [PhysX particle simulation and offset documentation](https://docs.omniverse.nvidia.com/kit/docs/omni_physics/latest/dev_guide/particles/particles.html).
 7. NVIDIA Omniverse, [PhysX PBD material API reference](https://docs.omniverse.nvidia.com/kit/docs/usdrt/latest/_apidocs/classusdrt_1_1PhysxSchemaPhysxPBDMaterialAPI.html).
+8. NVIDIA Isaac Sim, [Omniverse Physics and PhysX SDK limitations](https://docs.isaacsim.omniverse.nvidia.com/5.0.0/physics/physics_resources.html) (isosurface limitation and workaround).
 
 Journal-metric sources: [*Advanced Functional Materials*](https://advanced.onlinelibrary.wiley.com/journal/16163028), [*Advanced Science*](https://advanced.onlinelibrary.wiley.com/journal/21983844), [*Acta Biomaterialia*](https://www.sciencedirect.com/journal/acta-biomaterialia), and [*Polymers*](https://www.mdpi.com/journal/polymers/imprint).
 

@@ -111,6 +111,8 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn("particleUtils.add_physx_particleset_points", source)
         self.assertIn("particleUtils.add_pbd_particle_material", source)
         self.assertIn("particleUtils.add_physx_particle_isosurface", source)
+        self.assertIn('"RPP_PARTICLE_ISOSURFACE", "0"', source)
+        self.assertIn("safe default; PBD physics remains enabled", source)
         self.assertIn("PhysxSchema.PhysxSceneAPI.Apply", source)
         self.assertIn("CreateEnableGPUDynamicsAttr().Set(True)", source)
         self.assertIn('CreateBroadphaseTypeAttr().Set("GPU")', source)
