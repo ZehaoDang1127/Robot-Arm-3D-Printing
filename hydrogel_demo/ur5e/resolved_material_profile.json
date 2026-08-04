@@ -1,0 +1,16 @@
+{
+  "profile_id": "alginate_chitosan_pic_al1ch1_research",
+  "name": "alginate_chitosan_pic_al1ch1_research",
+  "extrusion_mode": "volumetric",
+  "filament_diameter_mm": null,
+  "syringe_inner_diameter_mm": null,
+  "flow_multiplier": 1.0,
+  "density_g_cm3": 1.05,
+  "physx_particle_contact_offset_m": 0.0002,
+  "physx_viscosity": 1000.0,
+  "physx_cohesion": 5.0,
+  "physx_adhesion": 15.0,
+  "physx_surface_tension": 0.02,
+  "physx_friction": 1000.0,
+  "physx_damping": 0.99
+}
