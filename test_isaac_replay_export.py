@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from unittest import mock
@@ -10,6 +11,14 @@ import numpy as np
 from robotic_printing_platform.exporters.isaac import export_isaac_bundle
 from robotic_printing_platform.extrusion import MaterialProfile
 from robotic_printing_platform.robots.franka_panda import IKConfig, IKReport, RobotTrajectory, TrajectoryPoint
+
+
+TEST_MATERIAL = MaterialProfile(
+    profile_id="test_material",
+    name="test material",
+    extrusion_mode="volumetric",
+    density_g_cm3=1.0,
+)
 
 
 class IsaacReplayExportTests(unittest.TestCase):
@@ -51,7 +60,11 @@ class IsaacReplayExportTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as directory:
-            bundle = export_isaac_bundle(trajectory, Path(directory))
+            bundle = export_isaac_bundle(
+                trajectory,
+                Path(directory),
+                material_profile=TEST_MATERIAL,
+            )
             source = bundle["isaac_script"].read_text(encoding="utf-8")
             compile(source, str(bundle["isaac_script"]), "exec")
 
@@ -143,7 +156,9 @@ class IsaacReplayExportTests(unittest.TestCase):
             config=IKConfig(),
         )
         material = MaterialProfile(
+            profile_id="test_paste",
             name="test paste",
+            extrusion_mode="volumetric",
             density_g_cm3=1.6,
             physx_particle_contact_offset_m=0.0007,
             physx_viscosity=432.0,
@@ -162,13 +177,21 @@ class IsaacReplayExportTests(unittest.TestCase):
                 bed_center_xyz_m=(0.31, -0.04, 0.23),
             )
             source = bundle["isaac_script"].read_text(encoding="utf-8")
+            resolved_material = json.loads(
+                bundle["material_profile"].read_text(encoding="utf-8")
+            )
 
         self.assertIn("BED_CENTER_M = (0.31, -0.04, 0.23)", source)
+        self.assertIn("MATERIAL_PROFILE_ID = 'test_paste'", source)
+        self.assertIn("MATERIAL_NAME = 'test paste'", source)
+        self.assertIn("MATERIAL_EXTRUSION_MODE = 'volumetric'", source)
         self.assertIn("MATERIAL_DENSITY_KG_M3 = 1600.0", source)
         self.assertIn("PARTICLE_CONTACT_OFFSET_M = 0.0007", source)
         self.assertIn("PARTICLE_VISCOSITY = 432.0", source)
         self.assertIn("PARTICLE_COHESION = 6.0", source)
         self.assertIn("PARTICLE_ADHESION = 7.0", source)
+        self.assertEqual(resolved_material["profile_id"], "test_paste")
+        self.assertEqual(resolved_material["physx_viscosity"], 432.0)
 
     def test_custom_robot_usd_overrides_configured_asset(self):
         point = TrajectoryPoint(
@@ -201,6 +224,7 @@ class IsaacReplayExportTests(unittest.TestCase):
                 trajectory,
                 Path(directory),
                 robot_usd_path=custom_usd,
+                material_profile=TEST_MATERIAL,
             )
             source = bundle["isaac_script"].read_text(encoding="utf-8")
 
@@ -219,6 +243,7 @@ class IsaacReplayExportTests(unittest.TestCase):
                     trajectory,
                     Path(directory),
                     robot_usd_path=custom_usd,
+                    material_profile=TEST_MATERIAL,
                 )
             fallback_source = bundle["isaac_script"].read_text(encoding="utf-8")
 

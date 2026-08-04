@@ -30,8 +30,14 @@ class EndToEndSmokeTests(unittest.TestCase):
                     validation_path = bundles[robot_model]["validation_report"]
                     csv_path = bundles[robot_model]["csv"]
                     trajectory_json_path = bundles[robot_model]["json"]
+                    isaac_script_path = bundles[robot_model]["isaac_script"]
+                    material_profile_path = bundles[robot_model]["material_profile"]
                     validation = json.loads(Path(validation_path).read_text(encoding="utf-8"))
                     trajectory_json = json.loads(Path(trajectory_json_path).read_text(encoding="utf-8"))
+                    isaac_source = Path(isaac_script_path).read_text(encoding="utf-8")
+                    resolved_material = json.loads(
+                        Path(material_profile_path).read_text(encoding="utf-8")
+                    )
 
                     self.assertGreater(trajectory.report.generated, 0)
                     self.assertGreater(trajectory.report.successful, 0)
@@ -45,6 +51,19 @@ class EndToEndSmokeTests(unittest.TestCase):
                     self.assertEqual(validation["joint_acceleration_violation_count"], 0)
                     self.assertEqual(trajectory_json["report"]["generated"], trajectory.report.generated)
                     self.assertEqual(trajectory_json["report"]["successful"], trajectory.report.successful)
+                    self.assertEqual(
+                        {point.material for point in trajectory.points},
+                        {"alginate_chitosan_pic_al1ch1_research"},
+                    )
+                    self.assertIn(
+                        "MATERIAL_PROFILE_ID = 'alginate_chitosan_pic_al1ch1_research'",
+                        isaac_source,
+                    )
+                    self.assertIn("MATERIAL_EXTRUSION_MODE = 'volumetric'", isaac_source)
+                    self.assertEqual(
+                        resolved_material["profile_id"],
+                        "alginate_chitosan_pic_al1ch1_research",
+                    )
                     self.assertTrue(csv_path.is_file())
                     self.assertTrue(validation_path.is_file())
 

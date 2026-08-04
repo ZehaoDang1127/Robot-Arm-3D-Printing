@@ -269,6 +269,10 @@ def build_waypoints(
     max_tilt_deg: float = 0.0,     # 0 => pure planar, nozzle straight down
     material_profile: MaterialProfile | None = None,
 ) -> PathPrep:
+    if material_profile is None:
+        raise ValueError(
+            "material_profile is required; load a named profile from planner_config.json"
+        )
     lo, hi = layers
     runs = _runs_from_moves(res, lo, hi)
 
@@ -358,6 +362,9 @@ class LayeredPathPlanner(PathPlanningAlgorithm):
 
 if __name__ == "__main__":
     import sys
+    from robotic_printing_platform.config import load_planner_config
+
     res = parse_gcode(sys.argv[1])
-    pp = build_waypoints(res, layers=(0, 3))
+    material = load_planner_config().material.profile
+    pp = build_waypoints(res, layers=(0, 3), material_profile=material)
     print(pp.summary())

@@ -6,6 +6,9 @@ robotic-printing-platform/
 ├── REPOSITORY_STRUCTURE.md
 ├── requirements.txt
 ├── planner_config.json
+├── material_profiles/
+│   ├── alginate_chitosan_pic_al1ch1_research.json
+│   └── pla.json
 ├── run_pipeline.py
 ├── visualize_pipeline.py
 ├── analyze_urdf_ik.py
@@ -52,7 +55,8 @@ robotic-printing-platform/
 - `README.md` documents setup, usage, modular extension points, and Isaac visual deposition.
 - `REPOSITORY_STRUCTURE.md` describes the repository layout.
 - `requirements.txt` lists Python package dependencies.
-- `planner_config.json` stores robot, bed, nozzle, path planning, IK, and material settings.
+- `planner_config.json` stores robot, bed, nozzle, path planning, IK, and the active material profile ID.
+- `material_profiles/` stores independently selectable material/process properties and PhysX calibration values.
 - `run_pipeline.py` is the main CLI entry point for parsing, planning, IK, export, and visualization.
 - `visualize_pipeline.py` writes SVG diagnostics for G-code, robot waypoints, XZ waypoint side view, and joint motion.
 - `analyze_urdf_ik.py` runs direct robot-folder FK, workspace, and IK analysis.
@@ -72,7 +76,7 @@ Parses Cura/Marlin-style G-code into motion primitives.
 
 Keeps extrusion and material behavior modular.
 
-- `materials.py` defines `MaterialProfile` and converts G-code `E` deltas into volume and optional mass.
+- `materials.py` validates generic `MaterialProfile` data loaded from JSON and converts G-code `E` deltas into volume and optional mass. It contains no selected material identity.
 
 ### `robotic_printing_platform/path_planning/`
 

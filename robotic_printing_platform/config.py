@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from robotic_printing_platform.extrusion import MaterialProfile
+from robotic_printing_platform.extrusion import MaterialProfile, load_material_profile
 from robotic_printing_platform.robots.franka_panda import (
     DEFAULT_PANDA_JOINT_NAMES,
     DEFAULT_PANDA_URDF_PATH,
@@ -21,6 +21,7 @@ from robotic_printing_platform.robots.generic import URDFIKConfig
 
 
 DEFAULT_CONFIG_PATH = Path("planner_config.json")
+DEFAULT_MATERIAL_PROFILES_DIR = Path("material_profiles")
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,8 @@ class PathPreparationConfig:
 
 @dataclass(frozen=True)
 class MaterialConfig:
+    profile_id: str
+    profile_path: str
     profile: MaterialProfile
 
 
@@ -164,10 +167,59 @@ def _load_robot_folder_config(robot_data: dict[str, Any], config_base_dir: Path)
     return merged, config_dir
 
 
+def _load_material_config(
+    material_data: Any,
+    config_base_dir: Path,
+    selected_profile_id: str | None,
+) -> MaterialConfig:
+    if not isinstance(material_data, dict):
+        raise ValueError("material must be a JSON object selecting a named profile")
+    allowed_fields = {"profile", "profiles_dir"}
+    unknown_fields = sorted(set(material_data) - allowed_fields)
+    if unknown_fields:
+        raise ValueError(
+            "material settings must live in a material profile; "
+            f"unexpected planner fields: {unknown_fields}"
+        )
+
+    profile_id_value = (
+        selected_profile_id
+        if selected_profile_id is not None
+        else material_data.get("profile")
+    )
+    if not isinstance(profile_id_value, str) or not profile_id_value:
+        raise ValueError("material.profile must select a non-empty material profile ID")
+    if Path(profile_id_value).name != profile_id_value or profile_id_value.endswith(".json"):
+        raise ValueError(
+            "material profile selection must be an ID such as 'pla', not a path or filename"
+        )
+
+    profiles_dir = Path(
+        material_data.get("profiles_dir", DEFAULT_MATERIAL_PROFILES_DIR)
+    )
+    if not profiles_dir.is_absolute():
+        profiles_dir = (config_base_dir / profiles_dir).resolve()
+    profile_path = profiles_dir / f"{profile_id_value}.json"
+    if not profile_path.is_file():
+        available_profiles = sorted(path.stem for path in profiles_dir.glob("*.json"))
+        raise ValueError(
+            f"unknown material profile {profile_id_value!r}; "
+            f"available profiles: {available_profiles}"
+        )
+
+    profile = load_material_profile(profile_path)
+    return MaterialConfig(
+        profile_id=profile.profile_id,
+        profile_path=str(profile_path),
+        profile=profile,
+    )
+
+
 def load_planner_config(
     path: str | Path = DEFAULT_CONFIG_PATH,
     *,
     robot_config_dir: str | Path | None = None,
+    material_profile_id: str | None = None,
 ) -> PlannerConfig:
     config_path = Path(path)
     data = json.loads(config_path.read_text(encoding="utf-8"))
@@ -182,7 +234,7 @@ def load_planner_config(
         **data.get("nozzle_tcp", {}),
         **robot_data.get("nozzle_tcp", {}),
     }
-    material_data = data.get("material", {})
+    material_data = data.get("material")
     path_data = data.get("path_preparation", {})
 
     robot = RobotConfig(
@@ -238,32 +290,10 @@ def load_planner_config(
             "nozzle_tcp.flange_to_nozzle_rpy_rad",
         ),
     )
-    material = MaterialConfig(
-        profile=MaterialProfile(
-            name=str(material_data.get("name", "PLA")),
-            extrusion_mode=str(material_data.get("extrusion_mode", "filament_length")),
-            filament_diameter_mm=float(material_data.get("filament_diameter_mm", 1.75)),
-            syringe_inner_diameter_mm=(
-                None
-                if material_data.get("syringe_inner_diameter_mm") is None
-                else float(material_data["syringe_inner_diameter_mm"])
-            ),
-            flow_multiplier=float(material_data.get("flow_multiplier", 1.0)),
-            density_g_cm3=(
-                None
-                if material_data.get("density_g_cm3", 1.24) is None
-                else float(material_data.get("density_g_cm3", 1.24))
-            ),
-            physx_particle_contact_offset_m=float(
-                material_data.get("physx_particle_contact_offset_m", 0.0005)
-            ),
-            physx_viscosity=float(material_data.get("physx_viscosity", 1000.0)),
-            physx_cohesion=float(material_data.get("physx_cohesion", 5.0)),
-            physx_adhesion=float(material_data.get("physx_adhesion", 10.0)),
-            physx_surface_tension=float(material_data.get("physx_surface_tension", 0.02)),
-            physx_friction=float(material_data.get("physx_friction", 1000.0)),
-            physx_damping=float(material_data.get("physx_damping", 0.99)),
-        )
+    material = _load_material_config(
+        material_data,
+        config_base_dir,
+        material_profile_id,
     )
     path_preparation = PathPreparationConfig(
         max_seg_len_mm=float(path_data.get("max_seg_len_mm", 3.0)),

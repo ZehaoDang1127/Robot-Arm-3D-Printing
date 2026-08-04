@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from dataclasses import asdict
 from pathlib import Path
 
 from robotic_printing_platform.extrusion import MaterialProfile
@@ -83,6 +84,9 @@ BEAD_COLOR = Gf.Vec3f(1.0, 0.28, 0.03)
 BED_CENTER_M = {bed_center_m}
 BED_HALF_EXTENTS_XY_M = {bed_half_extents_xy_m}
 BED_THICKNESS_M = {bed_thickness_m!r}
+MATERIAL_PROFILE_ID = {material_profile_id!r}
+MATERIAL_NAME = {material_name!r}
+MATERIAL_EXTRUSION_MODE = {material_extrusion_mode!r}
 MATERIAL_DENSITY_KG_M3 = {material_density_kg_m3!r}
 PARTICLE_CONTACT_OFFSET_M = {particle_contact_offset_m!r}
 PARTICLE_FLUID_REST_OFFSET_M = 0.99 * 0.6 * PARTICLE_CONTACT_OFFSET_M
@@ -856,7 +860,11 @@ def export_isaac_bundle(
         if robot_usd_path is None
         else str(Path(robot_usd_path).resolve())
     )
-    material = material_profile or MaterialProfile()
+    if material_profile is None:
+        raise ValueError(
+            "material_profile is required; export must use the same resolved profile as planning"
+        )
+    material = material_profile
     density_kg_m3 = (
         1000.0
         if material.density_g_cm3 is None
@@ -887,6 +895,7 @@ def export_isaac_bundle(
     )
     csv_path = out / f"{basename}_trajectory.csv"
     json_path = out / f"{basename}_trajectory.json"
+    material_profile_path = out / "resolved_material_profile.json"
     script_path = out / "replay_isaac.py"
     robot_usd_relative = ""
     robot_usd_fallback = effective_robot_usd_path
@@ -902,6 +911,10 @@ def export_isaac_bundle(
 
     traj.export_csv(csv_path)
     traj.export_json(json_path)
+    material_profile_path.write_text(
+        json.dumps(asdict(material), indent=2) + "\n",
+        encoding="utf-8",
+    )
     script_path.write_text(
         ISAAC_SCRIPT.format(
             trajectory_filename=csv_path.name,
@@ -914,6 +927,9 @@ def export_isaac_bundle(
             bed_center_m=repr(tuple(float(value) for value in effective_bed_center)),
             bed_half_extents_xy_m=repr(tuple(float(value) for value in traj.config.bed_half_extents_xy_m)),
             bed_thickness_m=float(traj.config.bed_thickness_m),
+            material_profile_id=material.profile_id,
+            material_name=material.name,
+            material_extrusion_mode=material.extrusion_mode,
             material_density_kg_m3=density_kg_m3,
             particle_contact_offset_m=material.physx_particle_contact_offset_m,
             particle_viscosity=material.physx_viscosity,
@@ -924,4 +940,9 @@ def export_isaac_bundle(
             particle_damping=material.physx_damping,
         )
     )
-    return {"csv": csv_path, "json": json_path, "isaac_script": script_path}
+    return {
+        "csv": csv_path,
+        "json": json_path,
+        "material_profile": material_profile_path,
+        "isaac_script": script_path,
+    }

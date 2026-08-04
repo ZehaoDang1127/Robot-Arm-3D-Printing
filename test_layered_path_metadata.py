@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from robotic_printing_platform.gcode.parser import Move, ParseResult
+from robotic_printing_platform.extrusion import MaterialProfile
 from robotic_printing_platform.path_planning.layered import build_waypoints
 
 
@@ -42,7 +43,18 @@ class LayeredPathMetadataTests(unittest.TestCase):
             used_z_inference=False,
         )
 
-        path = build_waypoints(parsed, (0, 2), max_seg_len_mm=1.0, simplify_deg=5.0)
+        material = MaterialProfile(
+            profile_id="test_volumetric",
+            name="test volumetric material",
+            extrusion_mode="volumetric",
+        )
+        path = build_waypoints(
+            parsed,
+            (0, 2),
+            max_seg_len_mm=1.0,
+            simplify_deg=5.0,
+            material_profile=material,
+        )
 
         self.assertEqual({waypoint.layer for waypoint in path.waypoints}, {0, 1})
         self.assertEqual(path.source_extrusion_mm, 9.0)

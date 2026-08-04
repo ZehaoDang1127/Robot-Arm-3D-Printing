@@ -1,0 +1,15 @@
+{
+  "profile_id": "pla",
+  "name": "PLA",
+  "extrusion_mode": "filament_length",
+  "filament_diameter_mm": 1.75,
+  "flow_multiplier": 1.0,
+  "density_g_cm3": 1.24,
+  "physx_particle_contact_offset_m": 0.0005,
+  "physx_viscosity": 1000.0,
+  "physx_cohesion": 5.0,
+  "physx_adhesion": 10.0,
+  "physx_surface_tension": 0.02,
+  "physx_friction": 1000.0,
+  "physx_damping": 0.99
+}

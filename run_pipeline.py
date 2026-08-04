@@ -44,11 +44,15 @@ def run(
     all_layers: bool = False,
     robot: str = "panda",
     isaac_usd: str | Path | None = None,
+    material_profile_id: str | None = None,
 ):
     path = Path(path)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    cfg = load_planner_config(config_path)
+    cfg = load_planner_config(
+        config_path,
+        material_profile_id=material_profile_id,
+    )
     if robot not in {"panda", "ur5", "ur5e", "both", "config"}:
         raise ValueError("robot must be one of: panda, ur5, ur5e, both, config")
 
@@ -61,6 +65,10 @@ def run(
     res = parse_gcode(path)
     print("=== Stage 1: parse ===")
     print(res.summary())
+    print(
+        f"material: {cfg.material.profile_id} "
+        f"({cfg.material.profile.extrusion_mode})"
+    )
     print()
 
     if all_layers:
@@ -89,7 +97,11 @@ def run(
         robot_cfg = (
             cfg
             if robot_key == "config"
-            else load_planner_config(config_path, robot_config_dir=ROBOT_CONFIG_DIRS[robot_key])
+            else load_planner_config(
+                config_path,
+                robot_config_dir=ROBOT_CONFIG_DIRS[robot_key],
+                material_profile_id=material_profile_id,
+            )
         )
         output_name = "panda" if robot_key == "panda" else robot_cfg.robot.model
         robot_out = out / output_name
@@ -171,6 +183,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--hi", type=int, default=1, help="last layer to process, exclusive")
     parser.add_argument("--all-layers", action="store_true", help="process every parsed layer")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="planner JSON config file")
+    parser.add_argument(
+        "--material",
+        default=None,
+        metavar="PROFILE_ID",
+        help="override material.profile with a profile ID from material_profiles/",
+    )
     parser.add_argument("--max-seg-len-mm", type=float, default=None, help="override densified waypoint spacing")
     parser.add_argument("--simplify-deg", type=float, default=None, help="override collinear simplification angle")
     parser.add_argument("--bed-x-m", type=float, default=None, help="override bed center X in robot base frame")
@@ -229,4 +247,5 @@ if __name__ == "__main__":
         all_layers=args.all_layers,
         robot=args.robot,
         isaac_usd=args.isaac_usd,
+        material_profile_id=args.material,
     )

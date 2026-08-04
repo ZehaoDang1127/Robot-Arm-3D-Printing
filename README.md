@@ -144,6 +144,7 @@ Parse and prepare the first layer without running IK:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --material pla \
   --lo 0 --hi 1 \
   --skip-ik \
   --output-dir outputs/preview
@@ -158,6 +159,7 @@ Use coarse spacing and a waypoint cap for a quick Panda check:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --material pla \
   --robot panda \
   --lo 0 --hi 1 \
   --max-seg-len-mm 20 \
@@ -170,6 +172,7 @@ Run the same path against Panda and UR5:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --material pla \
   --robot both \
   --lo 0 --hi 1 \
   --max-seg-len-mm 20 \
@@ -186,6 +189,7 @@ and no path simplification:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --material pla \
   --robot ur5e \
   --isaac-usd UR5e_extruder.usd \
   --lo 0 --hi 1 \
@@ -234,6 +238,7 @@ Process every layer without IK:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --material pla \
   --all-layers \
   --skip-ik \
   --output-dir outputs/all_layers
@@ -244,6 +249,7 @@ path:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --material pla \
   --all-layers \
   --ik-stride 5000 \
   --max-seg-len-mm 20 \
@@ -255,6 +261,7 @@ Compare local greedy yaw selection with global dynamic programming:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --material pla \
   --robot ur5e \
   --lo 0 --hi 1 \
   --ik-selection-mode global_dp \
@@ -266,6 +273,7 @@ Measure IK convergence as the position tolerance tightens:
 
 ```bash
 python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
+  --material pla \
   --robot ur5e \
   --lo 0 --hi 1 \
   --max-ik-waypoints 100 \
@@ -295,29 +303,43 @@ experiment without changing the file.
 | `robot.config_dir` | Robot package selected when `--robot config` is used. |
 | `bed` | Bed center in the robot base frame, normal, footprint, thickness, and minimum clearance. |
 | `nozzle_tcp` | Flange-to-nozzle translation and roll/pitch/yaw. A robot package can override these values. |
-| `material` | Material name, extrusion interpretation, flow multiplier, density, and PhysX PBD coefficients. |
+| `material` | Active material profile ID and the directory containing profile JSON files. |
 | `path_preparation` | Maximum Cartesian segment length and collinear simplification tolerance. |
 | `ik` | Residual tolerances, iteration budget, damping, yaw sampling, local/global selection weights, stride, and waypoint cap. |
 
 ### Change the material model
 
+`planner_config.json` selects one profile; it does not duplicate material
+properties:
+
 ```json
 {
   "material": {
-    "name": "PLA",
-    "extrusion_mode": "filament_length",
-    "filament_diameter_mm": 1.75,
-    "flow_multiplier": 1.0,
-    "density_g_cm3": 1.24
+    "profiles_dir": "material_profiles",
+    "profile": "alginate_chitosan_pic_al1ch1_research"
   }
 }
 ```
+
+Every material-specific value lives in the selected file, for example
+`material_profiles/alginate_chitosan_pic_al1ch1_research.json`. Select another
+installed profile without editing the planner configuration:
+
+```bash
+python run_pipeline.py model.gcode --material pla
+```
+
+The selected profile is resolved once and passed to path preparation and Isaac
+export. The generated replay embeds `MATERIAL_PROFILE_ID`, `MATERIAL_NAME`,
+`MATERIAL_EXTRUSION_MODE`, and the resolved PhysX values so the two stages cannot
+silently use different materials. Unknown profiles and unknown profile fields
+fail with an explicit configuration error.
 
 The parser keeps raw extrusion as `Move.e`, `Move.de`, and `Move.has_e`. During
 path preparation, each positive `de` is converted into
 `extrusion_volume_mm3` and, when density is configured, `extrusion_mass_g`.
 Simplification and densification redistribute extrusion across new waypoints
-and fail fast if the total deposited filament is not conserved.
+and fail fast if the total commanded extrusion is not conserved.
 
 `extrusion_mode` controls how a positive G-code `E` delta becomes volume:
 
@@ -329,13 +351,14 @@ and fail fast if the total deposited filament is not conserved.
 
 ### Research hydrogel preset
 
-`planner_config_hydrogel.json` provides one fixed research simulation profile:
-the Al1Ch1.0 alginate-chitosan polyion-complex ink reported by Liu et al. [1].
-The reference ink used 2.0 g sodium alginate and 1.663 g chitosan per 20 mL
-water, a 1:1 alginate-to-chitosan molar ratio, and a 400 micrometre nozzle. It
-uses volumetric extrusion here, so its input G-code must express `E` in cubic
-millimetres. Do not apply it unchanged to ordinary Cura filament G-code, whose
-`E` values are normally filament length.
+`material_profiles/alginate_chitosan_pic_al1ch1_research.json` is the active
+profile in `planner_config.json`. It represents the Al1Ch1.0 alginate-chitosan
+polyion-complex ink reported by Liu et al. [1]. The reference ink used 2.0 g
+sodium alginate and 1.663 g chitosan per 20 mL water, a 1:1
+alginate-to-chitosan molar ratio, and a 400 micrometre nozzle. It uses volumetric
+extrusion here, so its input G-code must express `E` in cubic millimetres. Do
+not apply it unchanged to ordinary Cura filament G-code, whose `E` values are
+normally filament length.
 
 The preset is supported by several papers with different evidence roles rather
 than treating one paper as a complete material model. Gao et al. [2] provide a
@@ -349,7 +372,7 @@ coefficients for Al1Ch1.0.
 
 ```bash
 python run_pipeline.py hydrogel_volumetric.gcode \
-  --config planner_config_hydrogel.json \
+  --material alginate_chitosan_pic_al1ch1_research \
   --robot ur5e \
   --isaac-usd UR5e_extruder.usd \
   --output-dir outputs/hydrogel
@@ -391,6 +414,7 @@ The pipeline writes one subdirectory per selected robot beneath
 | `joint_trajectory.svg` | Joint position plot for the solved trajectory. |
 | `robot_print_trajectory.csv` | Flat trajectory with time, joints, derivatives, pose, layer, segment, extrusion, IK residual, iteration, and Jacobian fields. |
 | `robot_print_trajectory.json` | Structured form of the same trajectory and its IK summary. |
+| `resolved_material_profile.json` | Exact material/process profile passed to planning and embedded into the Isaac replay. |
 | `trajectory_validation_report.json` | IK, timing, limits, singularity, collision-warning, and deposited-volume metrics. |
 | `ik_tolerance_sweep.json` | Convergence results when `--position-tolerance-sweep-mm` is requested. |
 | `replay_isaac.py` | Standalone Isaac Sim replay with time interpolation and PhysX PBD material extrusion. |
@@ -464,8 +488,10 @@ Robot-Arm-3D-Printing/
 ├── run_pipeline.py                    # end-to-end CLI
 ├── analyze_urdf_ik.py                 # direct FK/workspace/IK analysis
 ├── visualize_pipeline.py              # dependency-free SVG diagnostics
-├── planner_config.json                # workcell, material, path, and IK settings
-├── planner_config_hydrogel.json       # research-only volumetric hydrogel preset
+├── planner_config.json                # workcell, active material, path, and IK settings
+├── material_profiles/                 # swappable material/process profiles
+│   ├── alginate_chitosan_pic_al1ch1_research.json
+│   └── pla.json
 ├── requirements.txt                   # NumPy runtime dependency
 ├── UR5e_extruder.usd                  # UR5e + mounted-extruder assembly
 ├── Mount_Extruder_Models/             # mount USD/USDZ/STL payloads
@@ -516,10 +542,13 @@ placement without modifying parsing, IK, validation, or export.
 
 ### Add a process/material model
 
-`MaterialProfile` supports filament-length, direct-volumetric, and syringe-plunger
-interpretations of `E`. This lets paste and hydrogel processes retain the same
-waypoint/export schema without pretending their feedstock is thermoplastic
-filament.
+Copy an existing JSON file under `material_profiles/`, rename it so its filename
+matches its `profile_id`, and replace all material/process values. Then select
+it with `--material PROFILE_ID` or set `planner_config.json -> material.profile`.
+No Python or Isaac exporter change is required for profiles using one of the
+existing `filament_length`, `volumetric`, or `syringe_plunger` interpretations
+of `E`. Add Python code only when a process requires a fundamentally different
+conversion from G-code extrusion to deposited volume.
 
 ## Validation and tests
 
@@ -545,14 +574,15 @@ and an end-to-end G-code smoke export for all bundled robot packages.
 
 ## References and parameter provenance
 
-`planner_config_hydrogel.json` intentionally represents only the Al1Ch1.0
-formulation from Liu et al. [1]. Its composition and nozzle size come from that
-paper. The experimental literature is then triangulated using a higher-impact
-alginate extrusion study [2], an in-situ skin-wound extrusion study [3], and a
-measured alginate-bioink density study [4]. These papers establish that
-shear-thinning hydrogel extrusion and direct wound deposition are credible
-research targets; they do not establish a numerical mapping from rheometer data
-to PhysX PBD coefficients.
+The active
+`material_profiles/alginate_chitosan_pic_al1ch1_research.json` profile
+intentionally represents only the Al1Ch1.0 formulation from Liu et al. [1]. Its
+composition and nozzle size come from that paper. The experimental literature
+is then triangulated using a higher-impact alginate extrusion study [2], an
+in-situ skin-wound extrusion study [3], and a measured alginate-bioink density
+study [4]. These papers establish that shear-thinning hydrogel extrusion and
+direct wound deposition are credible research targets; they do not establish a
+numerical mapping from rheometer data to PhysX PBD coefficients.
 
 ### Evidence boundaries
 
@@ -568,7 +598,7 @@ The PhysX PBD coefficients below are therefore solver controls. They must not be
 interpreted as laboratory properties such as viscosity in Pa s or surface
 tension in N/m.
 
-| Preset field | Value | Provenance and intended use |
+| Profile field | Value | Provenance and intended use |
 | --- | ---: | --- |
 | `density_g_cm3` | `1.05` | Literature-backed proxy for concentrated printable alginate bioinks [4]. Liu et al. did not report density for Al1Ch1.0, so replace this proxy with a measurement if the ink is prepared. |
 | `physx_viscosity` | `1000` | Starting solver value adapted from NVIDIA's PhysX **Paint Ball Emitter** demo [5]. It is dimensionless and is not `1000 Pa s` [7]. |
