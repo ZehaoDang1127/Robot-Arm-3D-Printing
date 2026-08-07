@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 
 from robotic_printing_platform.config import load_planner_config
-from robotic_printing_platform.extrusion import MaterialProfile, load_material_profile
+from robotic_printing_platform.extrusion import (
+    MaterialProfile,
+    load_material_profile,
+    material_profile_from_dict,
+)
 
 
 class MaterialProfileTests(unittest.TestCase):
@@ -60,6 +64,42 @@ class MaterialProfileTests(unittest.TestCase):
         self.assertAlmostEqual(profile.density_g_cm3, 1.05)
         self.assertAlmostEqual(profile.physx_particle_contact_offset_m, 0.0002)
         self.assertAlmostEqual(profile.physx_adhesion, 15.0)
+        self.assertAlmostEqual(profile.spreading_ratio, 1.35)
+        self.assertAlmostEqual(profile.spreading_time_s, 2.0)
+        self.assertAlmostEqual(profile.shrinkage_fraction, 0.08)
+        self.assertAlmostEqual(profile.shrinkage_time_s, 30.0)
+
+    def test_legacy_profile_data_gets_neutral_evolution_defaults(self):
+        profile = material_profile_from_dict(
+            {
+                "profile_id": "legacy",
+                "name": "legacy material",
+                "extrusion_mode": "volumetric",
+            }
+        )
+
+        self.assertEqual(profile.spreading_ratio, 1.0)
+        self.assertEqual(profile.spreading_time_s, 1.0)
+        self.assertEqual(profile.shrinkage_fraction, 0.0)
+        self.assertEqual(profile.shrinkage_time_s, 1.0)
+
+    def test_rejects_invalid_evolution_parameters(self):
+        invalid_profiles = (
+            ({"spreading_ratio": 0.9}, "spreading_ratio"),
+            ({"spreading_time_s": 0.0}, "spreading_time_s"),
+            ({"shrinkage_fraction": -0.1}, "shrinkage_fraction"),
+            ({"shrinkage_fraction": 1.0}, "shrinkage_fraction"),
+            ({"shrinkage_time_s": 0.0}, "shrinkage_time_s"),
+        )
+        for keyword_arguments, field_name in invalid_profiles:
+            with self.subTest(field_name=field_name):
+                with self.assertRaisesRegex(ValueError, field_name):
+                    MaterialProfile(
+                        profile_id="invalid_evolution",
+                        name="invalid evolution",
+                        extrusion_mode="volumetric",
+                        **keyword_arguments,
+                    )
 
     def test_cli_style_override_selects_pla_without_changing_planner_file(self):
         repo_root = Path(__file__).resolve().parent

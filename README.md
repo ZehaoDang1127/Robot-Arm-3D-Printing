@@ -24,7 +24,7 @@ replay bundle for NVIDIA Isaac Sim.
 - **Robot-agnostic core** — use the included Franka Panda, UR5, and UR5e packages or add another serial manipulator through a URDF and a JSON configuration.
 - **Redundancy-aware IK** — sample nozzle yaw and select solutions greedily or with a global dynamic-programming pass designed to reduce motion and discontinuities along print runs.
 - **Built-in validation** — report IK residuals, joint-limit margin, velocity and acceleration violations, Jacobian quality, estimated print time, and lightweight collision warnings.
-- **Simulation-ready output** — generate CSV/JSON trajectories, SVG diagnostics, an Isaac Sim replay, visual bead deposition, and desired-versus-actual joint-tracking logs.
+- **Simulation-ready output** — generate CSV/JSON trajectories, SVG diagnostics, an Isaac Sim replay, per-step measured-TCP bead deposition, and desired-versus-actual joint-tracking logs.
 
 ## UR5e mounted-extruder replay showcase
 
@@ -165,7 +165,7 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
   --max-seg-len-mm 20 \
   --simplify-deg 2 \
   --max-ik-waypoints 30 \
-  --output-dir outputs/smoke
+  --output-dir outputs
 ```
 
 Run the same path against Panda and UR5:
@@ -178,7 +178,7 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
   --max-seg-len-mm 20 \
   --simplify-deg 2 \
   --max-ik-waypoints 30 \
-  --output-dir outputs/compare
+  --output-dir outputs
 ```
 
 ### 4. Generate the UR5e mounted-extruder replay
@@ -196,7 +196,7 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
   --max-seg-len-mm 2 \
   --simplify-deg 0 \
   --ik-selection-mode greedy \
-  --output-dir outputs/ur5e_extruder
+  --output-dir outputs
 ```
 
 Do not add `--max-ik-waypoints` to a printing-quality export: that option is a
@@ -205,7 +205,7 @@ deliberate sampling cap for fast smoke tests.
 Launch the generated script with Isaac Sim's Python on Windows:
 
 ```powershell
-& '<ISAAC_SIM_ROOT>\python.bat' '<REPOSITORY_ROOT>\outputs\ur5e_extruder\ur5e\replay_isaac.py'
+& '<ISAAC_SIM_ROOT>\python.bat' '<REPOSITORY_ROOT>\outputs\ur5e\replay_isaac.py'
 ```
 
 > **HAIM lab desktop — universal Isaac demo:** Isaac Sim is installed at
@@ -219,7 +219,7 @@ git pull
 $env:RPP_DEPOSITION_MODE = "particles"
 $env:RPP_PARTICLE_ISOSURFACE = "0"
 cd "C:\isaac-sim"
-.\python.bat "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\isaac_demo\ur5e\replay_isaac.py"
+.\python.bat "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e\replay_isaac.py"
 ```
 
 The replay resolves the trajectory CSV and custom USD relative to its own
@@ -268,7 +268,7 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
   --ik-stride 5000 \
   --max-seg-len-mm 20 \
   --simplify-deg 2 \
-  --output-dir outputs/all_layers_preview
+  --output-dir outputs
 ```
 
 Compare local greedy yaw selection with global dynamic programming:
@@ -280,7 +280,7 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
   --lo 0 --hi 1 \
   --ik-selection-mode global_dp \
   --max-ik-waypoints 100 \
-  --output-dir outputs/global_dp_preview
+  --output-dir outputs
 ```
 
 Measure IK convergence as the position tolerance tightens:
@@ -292,7 +292,7 @@ python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
   --lo 0 --hi 1 \
   --max-ik-waypoints 100 \
   --position-tolerance-sweep-mm 8 5 3 2 1 \
-  --output-dir outputs/tolerance_sweep
+  --output-dir outputs
 ```
 
 Analyze a robot package directly with FK, workspace sampling, and IK:
@@ -344,10 +344,10 @@ python run_pipeline.py model.gcode --material pla
 ```
 
 The selected profile is resolved once and passed to path preparation and Isaac
-export. The generated replay embeds `MATERIAL_PROFILE_ID`, `MATERIAL_NAME`,
-`MATERIAL_EXTRUSION_MODE`, and the resolved PhysX values so the two stages cannot
-silently use different materials. Unknown profiles and unknown profile fields
-fail with an explicit configuration error.
+export. The exporter writes that exact profile beside the replay as
+`resolved_material_profile.json`; replay loads and validates it at launch so
+the two stages cannot silently use different materials. Unknown profiles and
+unknown profile fields fail with an explicit configuration error.
 
 The parser keeps raw extrusion as `Move.e`, `Move.de`, and `Move.has_e`. During
 path preparation, each positive `de` is converted into
@@ -384,12 +384,19 @@ Jia et al. [4] provide the measured alginate-bioink density used as a proxy.
 Those studies use different hydrogel formulations and do not supply PhysX PBD
 coefficients for Al1Ch1.0.
 
+The preset also stores constant post-deposition preview parameters:
+`spreading_ratio=1.35`, `spreading_time_s=2.0`,
+`shrinkage_fraction=0.08`, and `shrinkage_time_s=30.0`. These are transparent
+project calibration placeholders, not measurements reported for Al1Ch1.0.
+Visual replay applies them with exponential spreading and shrinkage curves;
+replace them with bead-width/height measurements before quantitative use.
+
 ```bash
 python run_pipeline.py hydrogel_volumetric.gcode \
   --material alginate_chitosan_pic_al1ch1_research \
   --robot ur5e \
   --isaac-usd UR5e_extruder.usd \
-  --output-dir outputs/hydrogel
+  --output-dir outputs
 ```
 
 The paper sprayed 0.5 mol/L HCl after each deposited layer to induce
@@ -417,8 +424,12 @@ not implemented by the default planner.
 
 ## Outputs
 
-The pipeline writes one subdirectory per selected robot beneath
-`--output-dir`.
+The pipeline writes one subdirectory per selected robot beneath the
+`--output-dir` root: `panda/`, `ur5/`, or `ur5e/`. Material and run names are
+not directory levels. Each replay reads `resolved_material_profile.json` beside
+its trajectory, so the same replay implementation works for every material
+profile. Running another export for a robot replaces that robot's current
+bundle; use a different output root only when an archived run is required.
 
 | Artifact | Description |
 | --- | --- |
@@ -428,17 +439,18 @@ The pipeline writes one subdirectory per selected robot beneath
 | `joint_trajectory.svg` | Joint position plot for the solved trajectory. |
 | `robot_print_trajectory.csv` | Flat trajectory with time, joints, derivatives, pose, layer, segment, extrusion, IK residual, iteration, and Jacobian fields. |
 | `robot_print_trajectory.json` | Structured form of the same trajectory and its IK summary. |
-| `resolved_material_profile.json` | Exact material/process profile passed to planning and embedded into the Isaac replay. |
+| `resolved_material_profile.json` | Exact material/process profile passed to planning and loaded by the Isaac replay. |
+| `deposition_manager.py` | Simulator-independent TCP sampling, flow integration, bead emission, and constant-parameter spreading/shrinkage model bundled for replay. |
 | `trajectory_validation_report.json` | IK, timing, limits, singularity, collision-warning, and deposited-volume metrics. |
 | `ik_tolerance_sweep.json` | Convergence results when `--position-tolerance-sweep-mm` is requested. |
-| `replay_isaac.py` | Standalone Isaac Sim replay with time interpolation and PhysX PBD material extrusion. |
+| `replay_isaac.py` | Isaac Sim replay entry point with time interpolation and PhysX PBD material extrusion; keep `deposition_manager.py` beside it. |
 
 When an Isaac replay runs, it additionally writes:
 
 | Runtime artifact | Description |
 | --- | --- |
 | `joint_tracking.csv` | Timestamped desired and measured joint positions and errors. |
-| `joint_tracking_summary.json` | Maximum/RMS tracking error, thresholds, pass/fail state, and skipped deposition count. |
+| `joint_tracking_summary.json` | Tracking errors plus sampled-TCP, deposited-volume, discontinuity, marker, particle, and visual-geometry-update accounting. |
 | `joint_tracking.svg` | Dependency-free desired-versus-actual tracking plot. |
 
 ## Isaac Sim replay
@@ -464,25 +476,40 @@ recommended for calibrated dynamics.
 | --- | --- |
 | `RPP_ROBOT_USD` | Override the robot or assembly asset used by replay. |
 | `RPP_TRAJECTORY_CSV` | Override the trajectory CSV used by replay. |
+| `RPP_TCP_PRIM` | Absolute USD path to one of the configured TCP-anchor links when automatic matching finds duplicate link names. |
+| `RPP_MAX_TCP_STEP_M` | Largest accepted measured TCP displacement in one physics step; default `0.02` m. Larger jumps break the bead instead of drawing across a teleport. |
 | `RPP_MOUNT_SCALE` | Explicit positive uniform scale for a different mount revision. |
 | `RPP_MOUNT_MASS_KG` | Measured positive mass of the complete mount/extruder payload. |
 | `RPP_ENABLE_MOUNT_COLLISION=1` | Enable mount collision when physical tool contact is intentionally under test. |
-| `RPP_DEPOSITION_MODE=particles` | PhysX PBD extrusion (default); use `visual` for the previous curve-only preview. |
+| `RPP_DEPOSITION_MODE=particles` | PhysX PBD extrusion (default); use `visual` for the lightweight geometric-bead preview. |
+| `RPP_POST_DEPOSITION_TIME_S` | Extra replay time after the trajectory for settling/evolution; default `2.0` s. Increase it to observe slower shrinkage. |
+| `RPP_MAX_DEPOSITION_SEGMENTS` | Maximum geometric bead pieces in visual mode; default `100000`. |
 | `RPP_MAX_DEPOSITION_PARTICLES` | Maximum particles in the shared particle set; default `250000`. |
 | `RPP_PARTICLE_ISOSURFACE=1` | Opt into the render-only continuous-surface GPU path. It is off by default for stability; PBD material physics remains active. |
 
-Physical deposition is enabled by default. The generated replay creates a GPU
-PhysX PBD particle system, a viscous/cohesive/adhesive material, and a static
-collider at the configured print-bed pose. Extruded volume is converted to a
-particle count with a carried fractional remainder, so discretization does not
-systematically lose material between trajectory rows. New material is appended
-to one shared particle set. Particle smoothing remains enabled. The optional
+Physical deposition is enabled by default. After every physics step, replay
+reads the realized TCP pose from the simulated end-link hierarchy and applies
+the configured link-to-nozzle transform. Material flow is not the Cartesian
+`feed_m_s`: for each incoming print segment it is derived as that segment's
+resolved `extrusion_volume_mm3` divided by its retimed duration. The deposition
+manager integrates this `mm^3/s` rate over the elapsed physics time, splits a
+step exactly when it crosses a flow boundary, and places material along the
+measured TCP chord. Travel steps still refresh the TCP anchor, preventing a
+later print move from drawing across empty space.
+
+Particle mode creates a GPU PhysX PBD particle system, a
+viscous/cohesive/adhesive material, and a static collider at the configured
+print-bed pose. Extruded volume is converted to a particle count with a carried
+fractional remainder, so discretization does not systematically lose material
+between physics steps. New material is appended to one shared particle set.
+Particle smoothing remains enabled. The optional
 isosurface can make particles render as a continuous bead, but it does not
 change the underlying PBD fluid simulation and is disabled by default because
 some GPU/driver combinations fail in its sparse-grid CUDA kernels. NVIDIA also
 lists isosurface as render-only and potentially memory-leaking [8].
 
-The starting PBD parameters live under `material` in `planner_config.json`:
+The starting PBD parameters live in the resolved material profile selected by
+`planner_config.json`:
 `physx_particle_contact_offset_m`, `physx_viscosity`, `physx_cohesion`,
 `physx_adhesion`, `physx_surface_tension`, `physx_friction`, and
 `physx_damping`. Density is converted from `density_g_cm3` to SI units. These
@@ -490,13 +517,25 @@ parameters must be calibrated against measured bead width, height, spreading,
 and sag for a particular material and nozzle. A smaller contact offset increases
 resolution and particle count rapidly.
 
-This model provides material mass, gravity, particle-particle interaction,
-adhesion, and collision with the print bed. PhysX PBD does not model nozzle
-temperature, heat transfer, crystallization, curing chemistry, or a true
+Particle mode provides material mass, gravity, particle-particle interaction,
+adhesion, and collision with the print bed; PhysX evolves particle positions
+after deposition from the fixed solver parameters. PhysX PBD does not model
+nozzle temperature, heat transfer, crystallization, curing chemistry, or a true
 molten-to-solid phase transition. Use `RPP_DEPOSITION_MODE=visual` when a fast
-trajectory preview is more important than material physics. Deposition is
-skipped when joint error exceeds 0.05 rad. Replay passes its tracking check only
-when maximum error is at most 0.05 rad and RMS error is at most 0.02 rad.
+trajectory preview is more important than material physics; moving TCP samples
+become volume-scaled linear curves batched into 256-segment USD chunks, and
+stationary extrusion becomes a spherical droplet. After every physics step,
+visual mode recomputes each unsettled curve width or sphere radius from its
+immutable deposited size and age using `spreading_ratio`, `spreading_time_s`,
+`shrinkage_fraction`, and `shrinkage_time_s`. The round primitives use a scalar
+radius proxy that responds to both effects; the model also exposes separate
+width and height scales whose product preserves remaining cross-sectional
+area, but displaying true anisotropic flattening would require an elliptical
+mesh backend. Neutral defaults (`1`, `0`) preserve legacy geometry.
+
+Tracking error is reported independently, while deposition follows the actual
+TCP. Replay passes its tracking check only when maximum error is at most
+0.05 rad and RMS error is at most 0.02 rad.
 
 ## Repository layout
 
@@ -578,7 +617,8 @@ python -m unittest discover -v
 The tests cover layered metadata and extrusion conservation, generic robot
 configuration, global yaw/IK selection, trajectory retiming, tolerance sweeps,
 Jacobian manipulability, capsule collision warnings, Isaac replay generation,
-and an end-to-end G-code smoke export for all bundled robot packages.
+per-step deposition flow/continuity/volume behavior, and an end-to-end G-code
+smoke export for all bundled robot packages.
 
 ## Current scope and limitations
 
@@ -586,7 +626,7 @@ and an end-to-end G-code smoke export for all bundled robot packages.
 - The default path planner is planar and assigns a globally downward nozzle axis.
 - Collision checks use capsule and axis-aligned-box approximations and produce non-blocking warnings; they are not continuous collision proofs.
 - The NumPy IK solver is intended for planning, experimentation, and simulation export, not certified real-time robot control.
-- Isaac deposition uses a calibrated PBD approximation; it is not a thermo-mechanical phase-change simulation.
+- Isaac particle deposition uses a PBD approximation, and visual deposition uses a constant-parameter geometric proxy; neither is a calibrated thermo-mechanical, curing, or phase-change simulation.
 - Results depend on the accuracy of the URDF, bed transform, nozzle TCP, payload, and simulator asset.
 
 ## References and parameter provenance
@@ -625,6 +665,10 @@ tension in N/m.
 | `physx_damping` | `0.99` | Numerical damping adapted from NVIDIA's Paint Ball Emitter demo [5]. |
 | `physx_adhesion` | `15` | Project heuristic chosen to produce visibly adhesive deposition; no experimental source. Calibrate it against wet strand/bed tests. |
 | `physx_particle_contact_offset_m` | `0.0002` | Numerical resolution selected for the paper's 0.4 mm nozzle using NVIDIA's offset formulas [6]. It is not a material property and increases particle count substantially. |
+| `spreading_ratio` | `1.35` | Project preview heuristic: asymptotic lateral scale relative to the deposited bead. Calibrate from measured bead width. |
+| `spreading_time_s` | `2.0` | Project preview heuristic: exponential e-folding time for spreading. Calibrate from time-resolved imaging. |
+| `shrinkage_fraction` | `0.08` | Project preview heuristic: asymptotic fractional volume loss. Calibrate from cured or equilibrated bead volume. |
+| `shrinkage_time_s` | `30.0` | Project preview heuristic: exponential e-folding time for shrinkage. Calibrate from time-resolved volume measurements. |
 | `flow_multiplier` | `1.0` | Neutral process default. Determine the real value by weighing or volumetrically measuring dispensed material. |
 | `extrusion_mode` | `volumetric` | G-code convention: one positive `E` unit is one cubic millimetre. This is a process interpretation, not a physical property. |
 
@@ -632,6 +676,8 @@ This profile is therefore suitable for demonstrating one plausible
 alginate-chitosan deposition case. It is not a quantitative rheology model:
 Al1Ch1.0 is shear-thinning and chemically gels after deposition, whereas the
 current PhysX PBD material uses fixed solver coefficients.
+The visual spreading/shrinkage constants are likewise fixed heuristics rather
+than a coupled rheology, diffusion, or cross-linking model.
 
 1. Q. Liu, Q. Li, S. Xu, Q. Zheng, and X. Cao, ["Preparation and Properties of 3D Printed Alginate-Chitosan Polyion Complex Hydrogels for Tissue Engineering," *Polymers*, 10(6), 664 (2018)](https://doi.org/10.3390/polym10060664).
 2. C. Gao et al., ["A Small-Molecule Polycationic Crosslinker Boosts Alginate-Based Bioinks for Extrusion Bioprinting," *Advanced Functional Materials*, 34(9), 2310369 (2024)](https://doi.org/10.1002/adfm.202310369).

@@ -9,10 +9,15 @@ robotic-printing-platform/
 |-- material_profiles/
 |   |-- alginate_chitosan_pic_al1ch1_research.json
 |   `-- pla.json
-|-- isaac_demo/
+|-- outputs/
 |   |-- README.md
 |   |-- volumetric_patch.gcode
+|   |-- panda/
+|   |   `-- replay_isaac.py
+|   |-- ur5/
+|   |   `-- replay_isaac.py
 |   `-- ur5e/
+|       |-- deposition_manager.py
 |       |-- replay_isaac.py
 |       |-- resolved_material_profile.json
 |       |-- robot_print_trajectory.csv
@@ -25,6 +30,8 @@ robotic-printing-platform/
 |   |-- config.py
 |   |-- gcode/
 |   |-- extrusion/
+|   |   |-- deposition.py
+|   |   `-- materials.py
 |   |-- path_planning/
 |   |-- trajectory/
 |   |-- validation/
@@ -44,10 +51,12 @@ to a named material. A material is selected through `--material PROFILE_ID` or
 `planner_config.json`, loaded from `material_profiles/`, and copied into the
 generated bundle as `resolved_material_profile.json`.
 
-`isaac_demo/` is the stable, ready-to-run example location. Its committed
-snapshot uses one profile, but regenerating it with another compatible profile
-does not change the directory layout or launch command. Input G-code must use
-the extrusion convention declared by the selected profile.
+`outputs/` is both the normal pipeline destination and the stable, ready-to-run
+example location. Bundles are classified only by robot (`panda`, `ur5`, or
+`ur5e`), while the selected material is recorded as metadata inside each robot
+bundle. Regenerating a robot with another compatible profile does not change
+the directory layout or launch command. Input G-code must use the extrusion
+convention declared by the selected profile.
 
 ## Main components
 
@@ -58,15 +67,23 @@ the extrusion convention declared by the selected profile.
 - `robotic_printing_platform/extrusion/materials.py` validates profiles and
   converts G-code extrusion values to volume and mass without hard-coding a
   selected material.
-- `robotic_printing_platform/exporters/isaac.py` generates a standalone Isaac
-  Sim replay with the selected profile embedded.
-- `isaac_demo/ur5e/resolved_material_profile.json` identifies the exact profile
+- `robotic_printing_platform/extrusion/deposition.py` integrates piecewise
+  volumetric flow over measured TCP samples and dispatches bead segments or
+  stationary droplets through a simulator-independent sink interface; it also
+  provides the constant-parameter bead spreading/shrinkage model.
+- `robotic_printing_platform/exporters/isaac.py` generates an Isaac Sim replay
+  bundle that loads the selected profile and sibling deposition manager at
+  runtime, resolves the TCP from the USD hierarchy, and selects a curve or PBD
+  particle sink. The curve sink updates unsettled widths and droplet radii on
+  every replay step.
+- `outputs/ur5e/resolved_material_profile.json` identifies the exact profile
   used for the committed replay snapshot.
 
 ## Generated outputs
 
 Normal pipeline output is written under the directory supplied by
-`--output-dir` and then separated by robot model. Directories matching
-`outputs*` are ignored because their contents are reproducible and may be
-large. The smaller `isaac_demo/` bundle is intentionally tracked so the lab
-desktop has an immediately launchable example.
+`--output-dir` and then separated by robot model. The canonical files in
+`outputs/panda/`, `outputs/ur5/`, and `outputs/ur5e/` are intentionally tracked
+as immediately launchable examples. Other directories under `outputs/`, and
+directories with other `outputs*` names, remain ignored because they are
+reproducible and may be large.

@@ -55,11 +55,15 @@ class EndToEndSmokeTests(unittest.TestCase):
                         {point.material for point in trajectory.points},
                         {"alginate_chitosan_pic_al1ch1_research"},
                     )
-                    self.assertIn(
+                    expected_output_name = (
+                        "panda" if robot_model == "franka_panda" else robot_model
+                    )
+                    self.assertEqual(Path(isaac_script_path).parent.name, expected_output_name)
+                    self.assertIn("MATERIAL_PROFILE = load_material_profile", isaac_source)
+                    self.assertNotIn(
                         "MATERIAL_PROFILE_ID = 'alginate_chitosan_pic_al1ch1_research'",
                         isaac_source,
                     )
-                    self.assertIn("MATERIAL_EXTRUSION_MODE = 'volumetric'", isaac_source)
                     self.assertEqual(
                         resolved_material["profile_id"],
                         "alginate_chitosan_pic_al1ch1_research",

@@ -28,6 +28,10 @@ MATERIAL_PROFILE_FIELDS = frozenset(
         "physx_surface_tension",
         "physx_friction",
         "physx_damping",
+        "spreading_ratio",
+        "spreading_time_s",
+        "shrinkage_fraction",
+        "shrinkage_time_s",
     }
 )
 
@@ -50,6 +54,10 @@ class MaterialProfile:
     physx_surface_tension: float = 0.02
     physx_friction: float = 1000.0
     physx_damping: float = 0.99
+    spreading_ratio: float = 1.0
+    spreading_time_s: float = 1.0
+    shrinkage_fraction: float = 0.0
+    shrinkage_time_s: float = 1.0
 
     def __post_init__(self) -> None:
         allowed_id_characters = (
@@ -108,6 +116,23 @@ class MaterialProfile:
         for field_name, value in nonnegative_physx_values.items():
             if value < 0.0 or not math.isfinite(value):
                 raise ValueError(f"{field_name} must be a non-negative finite number")
+
+        if self.spreading_ratio < 1.0 or not math.isfinite(self.spreading_ratio):
+            raise ValueError(
+                "spreading_ratio must be a finite number greater than or equal to one"
+            )
+        positive_time_constants = {
+            "spreading_time_s": self.spreading_time_s,
+            "shrinkage_time_s": self.shrinkage_time_s,
+        }
+        for field_name, value in positive_time_constants.items():
+            if value <= 0.0 or not math.isfinite(value):
+                raise ValueError(f"{field_name} must be a positive finite number")
+        if (
+            not 0.0 <= self.shrinkage_fraction < 1.0
+            or not math.isfinite(self.shrinkage_fraction)
+        ):
+            raise ValueError("shrinkage_fraction must be finite and in [0, 1)")
 
     @property
     def filament_area_mm2(self) -> float:
@@ -168,6 +193,10 @@ def material_profile_from_dict(
         physx_surface_tension=float(data.get("physx_surface_tension", 0.02)),
         physx_friction=float(data.get("physx_friction", 1000.0)),
         physx_damping=float(data.get("physx_damping", 0.99)),
+        spreading_ratio=float(data.get("spreading_ratio", 1.0)),
+        spreading_time_s=float(data.get("spreading_time_s", 1.0)),
+        shrinkage_fraction=float(data.get("shrinkage_fraction", 0.0)),
+        shrinkage_time_s=float(data.get("shrinkage_time_s", 1.0)),
     )
 
 
