@@ -255,8 +255,14 @@ PARTICLE_SET_PRIM = f"{{DEPOSITION_PRIM}}/Particles"
 PARTICLE_MATERIAL_PRIM = f"{{DEPOSITION_PRIM}}/Material"
 PRINT_BED_PRIM = "/World/PrintBed"
 DEPOSITION_MODE = os.environ.get("RPP_DEPOSITION_MODE", "particles").strip().lower()
+VISUAL_BEAD_GEOMETRY = os.environ.get(
+    "RPP_VISUAL_BEAD_GEOMETRY", "mesh"
+).strip().lower()
 MAX_DEPOSITION_MARKERS = int(os.environ.get("RPP_MAX_DEPOSITION_SEGMENTS", "100000"))
 VISUAL_SEGMENTS_PER_CHUNK = 256
+MESH_RING_SEGMENTS = int(os.environ.get("RPP_MESH_RING_SEGMENTS", "12"))
+MESH_DROPLET_LONGITUDE_SEGMENTS = MESH_RING_SEGMENTS
+MESH_DROPLET_LATITUDE_SEGMENTS = max(4, MESH_RING_SEGMENTS // 2)
 MAX_DEPOSITION_PARTICLES = int(os.environ.get("RPP_MAX_DEPOSITION_PARTICLES", "250000"))
 MAX_TCP_STEP_M = float(os.environ.get("RPP_MAX_TCP_STEP_M", "0.02"))
 BEAD_COLOR = Gf.Vec3f(1.0, 0.28, 0.03)
@@ -337,6 +343,14 @@ TRACKING_PLOT_SAMPLE_STRIDE = 10
 
 if DEPOSITION_MODE not in {{"visual", "particles"}}:
     raise RuntimeError("RPP_DEPOSITION_MODE must be 'visual' or 'particles'")
+if VISUAL_BEAD_GEOMETRY not in {{"mesh", "curve"}}:
+    raise RuntimeError(
+        "RPP_VISUAL_BEAD_GEOMETRY must be 'mesh' or 'curve'"
+    )
+if not 6 <= MESH_RING_SEGMENTS <= 64:
+    raise RuntimeError(
+        "RPP_MESH_RING_SEGMENTS must be an integer from 6 through 64"
+    )
 if MAX_DEPOSITION_PARTICLES <= 0:
     raise RuntimeError("RPP_MAX_DEPOSITION_PARTICLES must be a positive integer")
 if MAX_DEPOSITION_MARKERS <= 0:
@@ -1150,6 +1164,486 @@ class VisualBeadSink:
         return None
 
 
+def bead_cross_section_frame(start_pose, end_pose):
+    """Return a stable cross-section frame perpendicular to one TCP chord."""
+    start_m = np.asarray(start_pose.position_m, dtype=float)
+    end_m = np.asarray(end_pose.position_m, dtype=float)
+    delta_m = end_m - start_m
+    length_m = float(np.linalg.norm(delta_m))
+    if length_m <= 1.0e-12:
+        raise ValueError("a bead segment requires distinct TCP positions")
+    tangent_m = delta_m / length_m
+    world_up_m = np.asarray((0.0, 0.0, 1.0), dtype=float)
+    vertical_m = world_up_m - float(np.dot(world_up_m, tangent_m)) * tangent_m
+    vertical_norm = float(np.linalg.norm(vertical_m))
+    if vertical_norm <= 1.0e-6:
+        fallback_axes = (
+            np.asarray((1.0, 0.0, 0.0), dtype=float),
+            np.asarray((0.0, 1.0, 0.0), dtype=float),
+        )
+        fallback_m = min(
+            fallback_axes,
+            key=lambda value: abs(float(np.dot(value, tangent_m))),
+        )
+        vertical_m = fallback_m - float(np.dot(fallback_m, tangent_m)) * tangent_m
+        vertical_norm = float(np.linalg.norm(vertical_m))
+    vertical_m = vertical_m / vertical_norm
+    lateral_m = np.cross(vertical_m, tangent_m)
+    lateral_m = lateral_m / float(np.linalg.norm(lateral_m))
+    return start_m, end_m, lateral_m, vertical_m, length_m
+
+
+def elliptical_tube_points(
+    start_m,
+    end_m,
+    lateral_m,
+    vertical_m,
+    half_width_m,
+    half_height_m,
+    ring_segments,
+):
+    """Build two elliptical rings for a straight, capped bead segment."""
+    if ring_segments < 3:
+        raise ValueError("ring_segments must be at least 3")
+    points = []
+    for center_m in (start_m, end_m):
+        for index in range(ring_segments):
+            angle = 2.0 * math.pi * index / ring_segments
+            position_m = (
+                center_m
+                + half_width_m * math.cos(angle) * lateral_m
+                + half_height_m * math.sin(angle) * vertical_m
+            )
+            points.append(Gf.Vec3f(*[float(value) for value in position_m]))
+    return points
+
+
+def elliptical_tube_topology(ring_segments):
+    """Return side quads and two polygon caps for an elliptical tube."""
+    if ring_segments < 3:
+        raise ValueError("ring_segments must be at least 3")
+    counts = []
+    indices = []
+    for index in range(ring_segments):
+        next_index = (index + 1) % ring_segments
+        counts.append(4)
+        indices.extend([
+            index,
+            next_index,
+            ring_segments + next_index,
+            ring_segments + index,
+        ])
+    counts.extend([ring_segments, ring_segments])
+    indices.extend(reversed(range(ring_segments)))
+    indices.extend(range(ring_segments, 2 * ring_segments))
+    return counts, indices
+
+
+def ellipsoid_points(
+    center_m,
+    initial_radius_m,
+    horizontal_scale,
+    vertical_scale,
+    longitude_segments,
+    latitude_segments,
+):
+    """Build a faceted ellipsoid aligned with the horizontal print bed."""
+    if longitude_segments < 3:
+        raise ValueError("longitude_segments must be at least 3")
+    if latitude_segments < 3:
+        raise ValueError("latitude_segments must be at least 3")
+    center = np.asarray(center_m, dtype=float)
+    horizontal_radius_m = initial_radius_m * horizontal_scale
+    vertical_radius_m = initial_radius_m * vertical_scale
+    points = [
+        Gf.Vec3f(
+            float(center[0]),
+            float(center[1]),
+            float(center[2] + vertical_radius_m),
+        )
+    ]
+    for latitude_index in range(1, latitude_segments):
+        latitude = math.pi * latitude_index / latitude_segments
+        ring_radius_m = horizontal_radius_m * math.sin(latitude)
+        z_m = center[2] + vertical_radius_m * math.cos(latitude)
+        for longitude_index in range(longitude_segments):
+            longitude = 2.0 * math.pi * longitude_index / longitude_segments
+            points.append(Gf.Vec3f(
+                float(center[0] + ring_radius_m * math.cos(longitude)),
+                float(center[1] + ring_radius_m * math.sin(longitude)),
+                float(z_m),
+            ))
+    points.append(Gf.Vec3f(
+        float(center[0]),
+        float(center[1]),
+        float(center[2] - vertical_radius_m),
+    ))
+    return points
+
+
+def ellipsoid_topology(longitude_segments, latitude_segments):
+    """Return pole triangles and latitude-band quads for an ellipsoid."""
+    if longitude_segments < 3:
+        raise ValueError("longitude_segments must be at least 3")
+    if latitude_segments < 3:
+        raise ValueError("latitude_segments must be at least 3")
+    counts = []
+    indices = []
+    first_ring = 1
+    for longitude_index in range(longitude_segments):
+        next_longitude = (longitude_index + 1) % longitude_segments
+        counts.append(3)
+        indices.extend([
+            0,
+            first_ring + longitude_index,
+            first_ring + next_longitude,
+        ])
+    ring_count = latitude_segments - 1
+    for ring_index in range(ring_count - 1):
+        current_ring = first_ring + ring_index * longitude_segments
+        next_ring = current_ring + longitude_segments
+        for longitude_index in range(longitude_segments):
+            next_longitude = (longitude_index + 1) % longitude_segments
+            counts.append(4)
+            indices.extend([
+                current_ring + longitude_index,
+                next_ring + longitude_index,
+                next_ring + next_longitude,
+                current_ring + next_longitude,
+            ])
+    bottom_index = 1 + ring_count * longitude_segments
+    last_ring = bottom_index - longitude_segments
+    for longitude_index in range(longitude_segments):
+        next_longitude = (longitude_index + 1) % longitude_segments
+        counts.append(3)
+        indices.extend([
+            bottom_index,
+            last_ring + next_longitude,
+            last_ring + longitude_index,
+        ])
+    return counts, indices
+
+
+def mesh_enclosed_volume_m3(points, counts, indices):
+    """Compute absolute enclosed polyhedron volume by triangulating each face."""
+    signed_volume_m3 = 0.0
+    cursor = 0
+    for count in counts:
+        face = indices[cursor:cursor + count]
+        cursor += count
+        origin = np.asarray(points[face[0]], dtype=float)
+        for offset in range(1, count - 1):
+            second = np.asarray(points[face[offset]], dtype=float)
+            third = np.asarray(points[face[offset + 1]], dtype=float)
+            signed_volume_m3 += float(
+                np.dot(origin, np.cross(second, third)) / 6.0
+            )
+    return abs(signed_volume_m3)
+
+
+class _MeshBeadSegment:
+    """Immutable segment frame plus its currently authored half-extents."""
+
+    def __init__(
+        self,
+        mesh,
+        start_m,
+        end_m,
+        lateral_m,
+        vertical_m,
+        initial_radius_m,
+        birth_time_s,
+    ):
+        self.mesh = mesh
+        self.start_m = np.asarray(start_m, dtype=float).copy()
+        self.end_m = np.asarray(end_m, dtype=float).copy()
+        self.lateral_m = np.asarray(lateral_m, dtype=float).copy()
+        self.vertical_m = np.asarray(vertical_m, dtype=float).copy()
+        self.initial_radius_m = float(initial_radius_m)
+        self.birth_time_s = float(birth_time_s)
+        self.half_width_m = float(initial_radius_m)
+        self.half_height_m = float(initial_radius_m)
+
+
+class _MeshBeadDroplet:
+    """Immutable droplet center and birth radius plus current ellipsoid radii."""
+
+    def __init__(self, mesh, center_m, initial_radius_m, birth_time_s):
+        self.mesh = mesh
+        self.center_m = np.asarray(center_m, dtype=float).copy()
+        self.initial_radius_m = float(initial_radius_m)
+        self.birth_time_s = float(birth_time_s)
+        self.horizontal_radius_m = float(initial_radius_m)
+        self.vertical_radius_m = float(initial_radius_m)
+
+
+class MeshBeadSink:
+    """USD mesh sink with volume-consistent anisotropic bead evolution."""
+
+    def __init__(self, stage, evolution_model):
+        ensure_deposition_root(stage)
+        self.stage = stage
+        self.material = create_preview_material(stage, Sdf.Path(PARTICLE_MATERIAL_PRIM))
+        self.evolution_model = evolution_model
+        self.marker_count = 0
+        self.skipped_volume_mm3 = 0.0
+        self.geometry_update_count = 0
+        self._created_paths = []
+        self._segments = []
+        self._droplets = []
+        self._active_segments = []
+        self._active_droplets = []
+        self._time_s = 0.0
+        self._evolution_enabled = (
+            evolution_model.spreading_ratio != 1.0
+            or evolution_model.shrinkage_fraction != 0.0
+        )
+        active_time_constants = []
+        if evolution_model.spreading_ratio != 1.0:
+            active_time_constants.append(evolution_model.spreading_time_s)
+        if evolution_model.shrinkage_fraction != 0.0:
+            active_time_constants.append(evolution_model.shrinkage_time_s)
+        self._settling_age_s = (
+            8.0 * max(active_time_constants) if active_time_constants else 0.0
+        )
+        self._final_width_scale = evolution_model.spreading_ratio
+        self._final_height_scale = (
+            (1.0 - evolution_model.shrinkage_fraction)
+            / evolution_model.spreading_ratio
+        )
+        self._final_droplet_horizontal_scale = evolution_model.spreading_ratio
+        self._final_droplet_vertical_scale = (
+            (1.0 - evolution_model.shrinkage_fraction)
+            / evolution_model.spreading_ratio ** 2
+        )
+
+    def _define_mesh(self, path, points, counts, indices):
+        mesh = UsdGeom.Mesh.Define(self.stage, path)
+        mesh.CreatePointsAttr(points)
+        mesh.CreateFaceVertexCountsAttr(counts)
+        mesh.CreateFaceVertexIndicesAttr(indices)
+        mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
+        mesh.CreateDoubleSidedAttr(True)
+        mesh.CreateDisplayColorAttr([BEAD_COLOR])
+        UsdShade.MaterialBindingAPI(mesh.GetPrim()).Bind(self.material)
+        return mesh
+
+    def _emit_segment(self, path, start_pose, end_pose, volume_mm3):
+        start_m, end_m, lateral_m, vertical_m, length_m = (
+            bead_cross_section_frame(start_pose, end_pose)
+        )
+        volume_m3 = max(0.0, float(volume_mm3)) * 1.0e-9
+        polygon_area_factor = (
+            0.5
+            * MESH_RING_SEGMENTS
+            * math.sin(2.0 * math.pi / MESH_RING_SEGMENTS)
+        )
+        initial_radius_m = math.sqrt(
+            volume_m3 / max(length_m * polygon_area_factor, 1.0e-30)
+        )
+        points = elliptical_tube_points(
+            start_m,
+            end_m,
+            lateral_m,
+            vertical_m,
+            initial_radius_m,
+            initial_radius_m,
+            MESH_RING_SEGMENTS,
+        )
+        counts, indices = elliptical_tube_topology(MESH_RING_SEGMENTS)
+        mesh = self._define_mesh(path, points, counts, indices)
+        segment = _MeshBeadSegment(
+            mesh,
+            start_m,
+            end_m,
+            lateral_m,
+            vertical_m,
+            initial_radius_m,
+            self._time_s,
+        )
+        self._segments.append(segment)
+        if self._evolution_enabled:
+            self._active_segments.append(segment)
+
+    def _emit_droplet(self, path, pose, volume_mm3):
+        volume_m3 = max(0.0, float(volume_mm3)) * 1.0e-9
+        counts, indices = ellipsoid_topology(
+            MESH_DROPLET_LONGITUDE_SEGMENTS,
+            MESH_DROPLET_LATITUDE_SEGMENTS,
+        )
+        unit_points = ellipsoid_points(
+            (0.0, 0.0, 0.0),
+            1.0,
+            1.0,
+            1.0,
+            MESH_DROPLET_LONGITUDE_SEGMENTS,
+            MESH_DROPLET_LATITUDE_SEGMENTS,
+        )
+        unit_volume_m3 = mesh_enclosed_volume_m3(unit_points, counts, indices)
+        initial_radius_m = (
+            volume_m3 / max(unit_volume_m3, 1.0e-30)
+        ) ** (1.0 / 3.0)
+        center_m = np.asarray(pose.position_m, dtype=float)
+        points = ellipsoid_points(
+            center_m,
+            initial_radius_m,
+            1.0,
+            1.0,
+            MESH_DROPLET_LONGITUDE_SEGMENTS,
+            MESH_DROPLET_LATITUDE_SEGMENTS,
+        )
+        mesh = self._define_mesh(path, points, counts, indices)
+        droplet = _MeshBeadDroplet(
+            mesh,
+            center_m,
+            initial_radius_m,
+            self._time_s,
+        )
+        self._droplets.append(droplet)
+        if self._evolution_enabled:
+            self._active_droplets.append(droplet)
+
+    def _emit(self, start_pose, end_pose, volume_mm3):
+        if self.marker_count >= MAX_DEPOSITION_MARKERS:
+            self.skipped_volume_mm3 += max(0.0, float(volume_mm3))
+            return
+        self.marker_count += 1
+        path = Sdf.Path(
+            f"{{DEPOSITION_PRIM}}/mesh_bead_{{self.marker_count:06d}}"
+        )
+        self._created_paths.append(path)
+        distance_m = float(np.linalg.norm(
+            np.asarray(end_pose.position_m, dtype=float)
+            - np.asarray(start_pose.position_m, dtype=float)
+        ))
+        if distance_m <= 1.0e-12:
+            self._emit_droplet(path, end_pose, volume_mm3)
+        else:
+            self._emit_segment(path, start_pose, end_pose, volume_mm3)
+
+    def emit_segment(self, start_pose, end_pose, volume_mm3, duration_s):
+        self._emit(start_pose, end_pose, volume_mm3)
+
+    def emit_point(self, pose, volume_mm3, duration_s):
+        self._emit(pose, pose, volume_mm3)
+
+    def advance_to(self, simulation_time_s):
+        """Age mesh vertices from immutable birth geometry at an absolute time."""
+        next_time_s = float(simulation_time_s)
+        if not math.isfinite(next_time_s):
+            raise ValueError("simulation_time_s must be finite")
+        if next_time_s < self._time_s:
+            raise ValueError("mesh bead time must be non-decreasing")
+        self._time_s = next_time_s
+        if not self._evolution_enabled:
+            return
+
+        updated_geometry = 0
+        active_segments = []
+        for segment in self._active_segments:
+            age_s = max(0.0, next_time_s - segment.birth_time_s)
+            if age_s >= self._settling_age_s:
+                width_scale = self._final_width_scale
+                height_scale = self._final_height_scale
+            else:
+                state = self.evolution_model.state_at(age_s)
+                width_scale = state.width_scale
+                height_scale = state.height_scale
+                active_segments.append(segment)
+            half_width_m = segment.initial_radius_m * width_scale
+            half_height_m = segment.initial_radius_m * height_scale
+            if (
+                not math.isclose(
+                    half_width_m,
+                    segment.half_width_m,
+                    rel_tol=1.0e-12,
+                    abs_tol=1.0e-15,
+                )
+                or not math.isclose(
+                    half_height_m,
+                    segment.half_height_m,
+                    rel_tol=1.0e-12,
+                    abs_tol=1.0e-15,
+                )
+            ):
+                points = elliptical_tube_points(
+                    segment.start_m,
+                    segment.end_m,
+                    segment.lateral_m,
+                    segment.vertical_m,
+                    half_width_m,
+                    half_height_m,
+                    MESH_RING_SEGMENTS,
+                )
+                segment.mesh.GetPointsAttr().Set(points)
+                segment.half_width_m = half_width_m
+                segment.half_height_m = half_height_m
+                updated_geometry += 1
+        self._active_segments = active_segments
+
+        active_droplets = []
+        for droplet in self._active_droplets:
+            age_s = max(0.0, next_time_s - droplet.birth_time_s)
+            if age_s >= self._settling_age_s:
+                horizontal_scale = self._final_droplet_horizontal_scale
+                vertical_scale = self._final_droplet_vertical_scale
+            else:
+                state = self.evolution_model.state_at(age_s)
+                horizontal_scale = state.spreading_scale
+                vertical_scale = (
+                    state.volume_scale / state.spreading_scale ** 2
+                )
+                active_droplets.append(droplet)
+            horizontal_radius_m = droplet.initial_radius_m * horizontal_scale
+            vertical_radius_m = droplet.initial_radius_m * vertical_scale
+            if (
+                not math.isclose(
+                    horizontal_radius_m,
+                    droplet.horizontal_radius_m,
+                    rel_tol=1.0e-12,
+                    abs_tol=1.0e-15,
+                )
+                or not math.isclose(
+                    vertical_radius_m,
+                    droplet.vertical_radius_m,
+                    rel_tol=1.0e-12,
+                    abs_tol=1.0e-15,
+                )
+            ):
+                points = ellipsoid_points(
+                    droplet.center_m,
+                    droplet.initial_radius_m,
+                    horizontal_scale,
+                    vertical_scale,
+                    MESH_DROPLET_LONGITUDE_SEGMENTS,
+                    MESH_DROPLET_LATITUDE_SEGMENTS,
+                )
+                droplet.mesh.GetPointsAttr().Set(points)
+                droplet.horizontal_radius_m = horizontal_radius_m
+                droplet.vertical_radius_m = vertical_radius_m
+                updated_geometry += 1
+        self._active_droplets = active_droplets
+        self.geometry_update_count += updated_geometry
+
+    def reset(self, clear_geometry=False):
+        if not clear_geometry:
+            return
+        for path in self._created_paths:
+            self.stage.RemovePrim(path)
+        self.marker_count = 0
+        self.skipped_volume_mm3 = 0.0
+        self.geometry_update_count = 0
+        self._created_paths = []
+        self._segments = []
+        self._droplets = []
+        self._active_segments = []
+        self._active_droplets = []
+        self._time_s = 0.0
+
+    def flush(self):
+        return None
+
+
 def interpolate_joint_target(rows, time_s, cursor):
     """Return q_desired(time_s) and the latest completed trajectory row."""
     if len(rows) == 1 or time_s <= rows[0]["time_from_start_s"]:
@@ -1234,6 +1728,9 @@ def write_tracking_outputs(
         "maximum_acceptable_rms_tracking_error_rad": MAX_ACCEPTABLE_RMS_TRACKING_ERROR_RAD,
         "tracking_passed": tracking_passed,
         "deposition_mode": DEPOSITION_MODE,
+        "visual_bead_geometry": (
+            VISUAL_BEAD_GEOMETRY if DEPOSITION_MODE == "visual" else None
+        ),
         "deposited_markers": deposited_markers,
         "deposited_particles": deposited_particles,
         "visual_geometry_updates": visual_geometry_updates,
@@ -1328,9 +1825,13 @@ else:
         shrinkage_fraction=MATERIAL_SHRINKAGE_FRACTION,
         shrinkage_time_s=MATERIAL_SHRINKAGE_TIME_S,
     )
-    visual_bead_sink = VisualBeadSink(world.stage, bead_evolution_model)
+    visual_bead_sink = (
+        MeshBeadSink(world.stage, bead_evolution_model)
+        if VISUAL_BEAD_GEOMETRY == "mesh"
+        else VisualBeadSink(world.stage, bead_evolution_model)
+    )
     print(
-        f"visual bead evolution: spreading ratio "
+        f"visual bead geometry: {{VISUAL_BEAD_GEOMETRY}}; spreading ratio "
         f"{{MATERIAL_SPREADING_RATIO:.6g}} over "
         f"{{MATERIAL_SPREADING_TIME_S:.6g}} s; shrinkage "
         f"{{MATERIAL_SHRINKAGE_FRACTION:.6g}} over "

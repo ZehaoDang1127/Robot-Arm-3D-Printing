@@ -75,8 +75,11 @@ convention declared by the selected profile.
 - `robotic_printing_platform/exporters/isaac.py` generates an Isaac Sim replay
   bundle that loads the selected profile and imports the central deposition
   module from the cloned repository at runtime, resolves the TCP from the USD
-  hierarchy, and selects a curve or PBD particle sink. The curve sink updates
-  unsettled widths and droplet radii on every replay step.
+  hierarchy, and selects a PBD particle sink or a visual mesh/curve sink. Visual
+  mode defaults to volume-consistent elliptical tube meshes with anisotropic
+  spreading and shrinkage; the circular-curve backend remains available as a
+  faster proxy. Both visual sinks update unsettled geometry on every replay
+  step.
 - `outputs/ur5e/resolved_material_profile.json` identifies the exact profile
   used for the committed replay snapshot.
 

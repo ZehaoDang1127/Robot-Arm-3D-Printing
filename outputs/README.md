@@ -28,14 +28,16 @@ Run these commands in PowerShell:
 ```powershell
 cd "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing"
 git pull
-$env:RPP_DEPOSITION_MODE = "particles"
-$env:RPP_PARTICLE_ISOSURFACE = "0"
+$env:RPP_DEPOSITION_MODE = "visual"
+$env:RPP_VISUAL_BEAD_GEOMETRY = "mesh"
+$env:RPP_MESH_RING_SEGMENTS = "12"
 cd "C:\isaac-sim"
 .\python.bat "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e\replay_isaac.py"
 ```
 
-The console prints the material profile ID, density, extrusion mode, and
-particle settings. Check those lines to confirm which material is running.
+The console prints the material profile ID, selected mesh backend, and
+spreading/shrinkage settings. Check those lines to confirm which material and
+visual geometry are running.
 
 ## Regenerate a compact bundle with any compatible material profile
 

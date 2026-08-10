@@ -216,8 +216,9 @@ Launch the generated script with Isaac Sim's Python on Windows:
 ```powershell
 cd "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing"
 git pull
-$env:RPP_DEPOSITION_MODE = "particles"
-$env:RPP_PARTICLE_ISOSURFACE = "0"
+$env:RPP_DEPOSITION_MODE = "visual"
+$env:RPP_VISUAL_BEAD_GEOMETRY = "mesh"
+$env:RPP_MESH_RING_SEGMENTS = "12"
 cd "C:\isaac-sim"
 .\python.bat "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e\replay_isaac.py"
 ```
@@ -491,6 +492,8 @@ recommended for calibrated dynamics.
 | `RPP_MOUNT_MASS_KG` | Measured positive mass of the complete mount/extruder payload. |
 | `RPP_ENABLE_MOUNT_COLLISION=1` | Enable mount collision when physical tool contact is intentionally under test. |
 | `RPP_DEPOSITION_MODE=particles` | PhysX PBD extrusion (default); use `visual` for the lightweight geometric-bead preview. |
+| `RPP_VISUAL_BEAD_GEOMETRY=mesh|curve` | Visual bead backend: `mesh` (default in visual mode) creates volume-consistent elliptical tube meshes; `curve` selects the faster circular-curve proxy. |
+| `RPP_MESH_RING_SEGMENTS` | Vertices around each elliptical mesh ring; default `12`, accepted range `6` through `64`. Higher values make the cross-section smoother at greater authoring and rendering cost. |
 | `RPP_POST_DEPOSITION_TIME_S` | Extra replay time after the trajectory for settling/evolution; default `2.0` s. Increase it to observe slower shrinkage. |
 | `RPP_MAX_DEPOSITION_SEGMENTS` | Maximum geometric bead pieces in visual mode; default `100000`. |
 | `RPP_MAX_DEPOSITION_PARTICLES` | Maximum particles in the shared particle set; default `250000`. |
@@ -526,21 +529,32 @@ parameters must be calibrated against measured bead width, height, spreading,
 and sag for a particular material and nozzle. A smaller contact offset increases
 resolution and particle count rapidly.
 
-Particle mode provides material mass, gravity, particle-particle interaction,
-adhesion, and collision with the print bed; PhysX evolves particle positions
-after deposition from the fixed solver parameters. PhysX PBD does not model
-nozzle temperature, heat transfer, crystallization, curing chemistry, or a true
-molten-to-solid phase transition. Use `RPP_DEPOSITION_MODE=visual` when a fast
-trajectory preview is more important than material physics; moving TCP samples
-become volume-scaled linear curves batched into 256-segment USD chunks, and
-stationary extrusion becomes a spherical droplet. After every physics step,
-visual mode recomputes each unsettled curve width or sphere radius from its
-immutable deposited size and age using `spreading_ratio`, `spreading_time_s`,
-`shrinkage_fraction`, and `shrinkage_time_s`. The round primitives use a scalar
-radius proxy that responds to both effects; the model also exposes separate
-width and height scales whose product preserves remaining cross-sectional
-area, but displaying true anisotropic flattening would require an elliptical
-mesh backend. Neutral defaults (`1`, `0`) preserve legacy geometry.
+Particle mode remains the overall default and provides material mass, gravity,
+particle-particle interaction, adhesion, and collision with the print bed;
+PhysX evolves particle positions after deposition from the fixed solver
+parameters. PhysX PBD does not model nozzle temperature, heat transfer,
+crystallization, curing chemistry, or a true molten-to-solid phase transition.
+
+Use `RPP_DEPOSITION_MODE=visual` when a fast trajectory preview is more
+important than material physics. Its default
+`RPP_VISUAL_BEAD_GEOMETRY=mesh` backend converts each moving TCP chord into an
+elliptical tube mesh whose cross-sectional area is derived from deposited
+volume divided by chord length. The material model evolves mesh width and
+height independently, so spreading produces anisotropic flattening while
+shrinkage reduces the represented volume consistently. Stationary extrusion
+becomes a volume-consistent ellipsoid whose lateral and vertical axes evolve
+independently. Set `RPP_VISUAL_BEAD_GEOMETRY=curve` for the faster
+circular-curve proxy, which batches linear curves into 256-segment USD chunks
+and uses spherical droplets but cannot display anisotropic flattening. After
+every physics step,
+both visual backends update unsettled geometry from its immutable deposited
+size and age using `spreading_ratio`, `spreading_time_s`,
+`shrinkage_fraction`, and `shrinkage_time_s`. Neutral defaults (`1`, `0`)
+preserve the initially deposited geometry.
+
+The mesh backend currently authors one USD mesh prim for every deposited TCP
+chord. For very long trajectories or high-frequency TCP sampling, select the
+curve backend to reduce prim count and improve preview performance.
 
 Tracking error is reported independently, while deposition follows the actual
 TCP. Replay passes its tracking check only when maximum error is at most
