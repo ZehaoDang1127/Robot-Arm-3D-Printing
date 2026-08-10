@@ -219,9 +219,14 @@ git pull
 $env:RPP_DEPOSITION_MODE = "visual"
 $env:RPP_VISUAL_BEAD_GEOMETRY = "mesh"
 $env:RPP_MESH_RING_SEGMENTS = "12"
+$env:RPP_POST_DEPOSITION_TIME_S = "30"
 cd "C:\isaac-sim"
 .\python.bat "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e\replay_isaac.py"
 ```
+
+The 30-second post-deposition window keeps the replay running after robot
+motion ends, allowing the deposited mesh to continue spreading and shrinking.
+The general default remains 2 seconds for shorter previews.
 
 The replay resolves the trajectory CSV and custom USD relative to its own
 location and discovers the cloned repository above the output directory. Set

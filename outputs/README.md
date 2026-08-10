@@ -31,9 +31,14 @@ git pull
 $env:RPP_DEPOSITION_MODE = "visual"
 $env:RPP_VISUAL_BEAD_GEOMETRY = "mesh"
 $env:RPP_MESH_RING_SEGMENTS = "12"
+$env:RPP_POST_DEPOSITION_TIME_S = "30"
 cd "C:\isaac-sim"
 .\python.bat "C:\Users\haim_\Desktop\Robot-Arm-3D-Printing\outputs\ur5e\replay_isaac.py"
 ```
+
+The 30-second post-deposition window lets the mesh continue spreading and
+shrinking after the robot finishes its trajectory. The general replay default
+is 2 seconds when this override is not set.
 
 The console prints the material profile ID, selected mesh backend, and
 spreading/shrinkage settings. Check those lines to confirm which material and
