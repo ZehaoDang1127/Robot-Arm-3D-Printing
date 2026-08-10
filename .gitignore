@@ -1,6 +1,18 @@
 __pycache__/
 *.py[cod]
 
+# Keep one canonical, checked-in replay snapshot at outputs/ while ignoring
+# other generated runs and outputs-prefixed scratch directories.
 outputs*/
+!outputs/
+outputs/*
+!outputs/README.md
+!outputs/volumetric_patch.gcode
+!outputs/panda/
+!outputs/panda/**
+!outputs/ur5/
+!outputs/ur5/**
+!outputs/ur5e/
+!outputs/ur5e/**
 verify_all_layers*/
 !verify_parse/

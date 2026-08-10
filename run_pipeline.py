@@ -194,7 +194,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bed-x-m", type=float, default=None, help="override bed center X in robot base frame")
     parser.add_argument("--bed-y-m", type=float, default=None, help="override bed center Y in robot base frame")
     parser.add_argument("--bed-z-m", type=float, default=None, help="override bed height in robot base frame")
-    parser.add_argument("--output-dir", default="outputs", help="directory for plots and exports")
+    parser.add_argument(
+        "--output-dir",
+        default="outputs",
+        help="output root; each bundle is written to a robot-named subdirectory",
+    )
     parser.add_argument("--skip-ik", action="store_true", help="only parse, prepare, and visualize waypoints")
     parser.add_argument("--ik-stride", type=int, default=None, help="override solve every Nth waypoint")
     parser.add_argument("--max-ik-waypoints", type=int, default=None, help="cap IK waypoints for smoke tests")
