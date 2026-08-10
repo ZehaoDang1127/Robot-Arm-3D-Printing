@@ -10,7 +10,7 @@
 ![Isaac Sim](https://img.shields.io/badge/export-NVIDIA%20Isaac%20Sim-76B900?logo=nvidia&logoColor=white)
 
 Convert Cura/Marlin G-code into material-aware Cartesian waypoints, solve a
-robot-specific joint trajectory, validate it, and export a self-contained
+robot-specific joint trajectory, validate it, and export a repository-backed
 replay bundle for NVIDIA Isaac Sim.
 
 </div>
@@ -223,8 +223,9 @@ cd "C:\isaac-sim"
 ```
 
 The replay resolves the trajectory CSV and custom USD relative to its own
-location, so the output and repository assets can be moved together without
-embedding machine-specific paths.
+location and discovers the cloned repository above the output directory. Set
+`RPP_PROJECT_ROOT` only when launching a replay stored outside the clone, so no
+machine-specific repository path needs to be embedded.
 
 ## Reference UR5e result
 
@@ -440,10 +441,9 @@ bundle; use a different output root only when an archived run is required.
 | `robot_print_trajectory.csv` | Flat trajectory with time, joints, derivatives, pose, layer, segment, extrusion, IK residual, iteration, and Jacobian fields. |
 | `robot_print_trajectory.json` | Structured form of the same trajectory and its IK summary. |
 | `resolved_material_profile.json` | Exact material/process profile passed to planning and loaded by the Isaac replay. |
-| `deposition_manager.py` | Simulator-independent TCP sampling, flow integration, bead emission, and constant-parameter spreading/shrinkage model bundled for replay. |
 | `trajectory_validation_report.json` | IK, timing, limits, singularity, collision-warning, and deposited-volume metrics. |
 | `ik_tolerance_sweep.json` | Convergence results when `--position-tolerance-sweep-mm` is requested. |
-| `replay_isaac.py` | Isaac Sim replay entry point with time interpolation and PhysX PBD material extrusion; keep `deposition_manager.py` beside it. |
+| `replay_isaac.py` | Isaac Sim replay entry point with time interpolation and PhysX PBD material extrusion; it imports the central deposition module from the cloned repository. |
 
 When an Isaac replay runs, it additionally writes:
 
@@ -460,6 +460,14 @@ main Python environment. The script loads the selected USD, initializes the
 robot at the first trajectory pose, waits for the articulation to settle, and
 then interpolates joint targets against the retimed trajectory clock.
 
+Deposition logic remains centralized in
+`robotic_printing_platform/extrusion/deposition.py`. A replay below the cloned
+repository finds that module automatically by walking up from its own folder.
+For an output stored elsewhere, set `RPP_PROJECT_ROOT` to the clone root before
+launching Isaac Sim. Consequently, an exported replay is intentionally not a
+standalone artifact and uses the deposition implementation in the current
+checkout.
+
 For custom Robot Assembler assets, the replay can select a `Physics=PhysX`
 variant and add a missing articulation-root marker in memory. The source USD is
 not modified. The repository's `UR5e_extruder.usd` also references
@@ -474,6 +482,7 @@ recommended for calibrated dynamics.
 
 | Environment variable | Purpose |
 | --- | --- |
+| `RPP_PROJECT_ROOT` | Cloned repository root containing `robotic_printing_platform/`; normally discovered automatically for replays under `outputs/`. |
 | `RPP_ROBOT_USD` | Override the robot or assembly asset used by replay. |
 | `RPP_TRAJECTORY_CSV` | Override the trajectory CSV used by replay. |
 | `RPP_TCP_PRIM` | Absolute USD path to one of the configured TCP-anchor links when automatic matching finds duplicate link names. |

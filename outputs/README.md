@@ -17,6 +17,9 @@ profile with a different extrusion convention, supply compatible G-code.
 The canonical `panda/`, `ur5/`, and `ur5e/` snapshots are tracked in the
 repository. Each replay loads its robot assets from the repository or the
 configured Isaac asset path. Other generated run directories remain ignored.
+Replay scripts also import the central deposition implementation from the
+clone. Scripts below this repository discover it automatically; set
+`RPP_PROJECT_ROOT` to the clone root when launching an output stored elsewhere.
 
 ## Launch the current bundle on the lab desktop
 

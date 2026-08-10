@@ -5,22 +5,81 @@ Run inside Isaac Sim, for example:
     ./python.sh replay_isaac.py
 
 Set RPP_ROBOT_USD to override the robot asset path at launch time.
+Set RPP_PROJECT_ROOT if this script is not below the cloned repository root.
 """
 
 import csv
 import json
 import math
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from deposition_manager import (
-    BeadEvolutionModel,
-    DepositionManager,
-    FlowSchedule,
-    TcpPose,
-)
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def resolve_project_root(script_dir):
+    """Find the cloned repository that owns the central deposition module."""
+    def is_project_root(candidate):
+        return (
+            (candidate / "robotic_printing_platform" / "__init__.py").is_file()
+            and (
+                candidate
+                / "robotic_printing_platform"
+                / "extrusion"
+                / "deposition.py"
+            ).is_file()
+        )
+
+    override = os.environ.get("RPP_PROJECT_ROOT", "").strip()
+    if override:
+        candidate = Path(override).expanduser().resolve()
+        if is_project_root(candidate):
+            return candidate
+        raise RuntimeError(
+            f"RPP_PROJECT_ROOT is not a robotic-printing-platform repository: "
+            f"{candidate}"
+        )
+
+    candidates = (script_dir, *script_dir.parents)
+    for candidate in candidates:
+        if is_project_root(candidate):
+            return candidate
+    raise RuntimeError(
+        f"could not locate the robotic-printing-platform repository above "
+        f"{script_dir}; searched {', '.join(str(path) for path in candidates)}. "
+        f"Set RPP_PROJECT_ROOT to the cloned repository root."
+    )
+
+
+PROJECT_ROOT = resolve_project_root(SCRIPT_DIR)
+project_root_text = str(PROJECT_ROOT)
+while project_root_text in sys.path:
+    sys.path.remove(project_root_text)
+sys.path.insert(0, project_root_text)
+
+try:
+    from robotic_printing_platform.extrusion import deposition as deposition_module
+except ImportError as error:
+    raise RuntimeError(
+        f"failed to import the central deposition module from {PROJECT_ROOT}: "
+        f"{error}"
+    ) from error
+expected_deposition_path = (
+    PROJECT_ROOT / "robotic_printing_platform" / "extrusion" / "deposition.py"
+).resolve()
+actual_deposition_path = Path(deposition_module.__file__).resolve()
+if actual_deposition_path != expected_deposition_path:
+    raise RuntimeError(
+        f"resolved project root {PROJECT_ROOT}, but imported deposition module "
+        f"from {actual_deposition_path}"
+    )
+BeadEvolutionModel = deposition_module.BeadEvolutionModel
+DepositionManager = deposition_module.DepositionManager
+FlowSchedule = deposition_module.FlowSchedule
+TcpPose = deposition_module.TcpPose
 from isaacsim import SimulationApp
 
 simulation_app = SimulationApp({"headless": False})
@@ -38,7 +97,6 @@ except ImportError:  # Isaac Sim 4.x compatibility
 from omni.physx.scripts import particleUtils, physicsUtils
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade, Vt, PhysxSchema
 
-SCRIPT_DIR = Path(__file__).resolve().parent
 TRAJECTORY_CSV = Path(
     os.environ.get("RPP_TRAJECTORY_CSV", SCRIPT_DIR / 'robot_print_trajectory.csv')
 ).resolve()

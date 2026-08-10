@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import ast
-import importlib.util
 import json
+import os
+import subprocess
 import sys
 import tempfile
-import typing
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -69,35 +69,17 @@ class IsaacReplayExportTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as directory:
+            legacy_manager_path = Path(directory) / "deposition_manager.py"
+            legacy_manager_path.write_text("legacy generated copy\n", encoding="utf-8")
             bundle = export_isaac_bundle(
                 trajectory,
                 Path(directory),
                 material_profile=TEST_MATERIAL,
             )
             source = bundle["isaac_script"].read_text(encoding="utf-8")
-            deposition_manager_source = bundle["deposition_manager"].read_text(
-                encoding="utf-8"
-            )
             compile(source, str(bundle["isaac_script"]), "exec")
-            compile(
-                deposition_manager_source,
-                str(bundle["deposition_manager"]),
-                "exec",
-            )
-            module_name = "bundled_deposition_manager_test"
-            spec = importlib.util.spec_from_file_location(
-                module_name,
-                bundle["deposition_manager"],
-            )
-            self.assertIsNotNone(spec)
-            self.assertIsNotNone(spec.loader)
-            bundled_module = importlib.util.module_from_spec(spec)
-            with mock.patch.dict(sys.modules, {module_name: bundled_module}):
-                spec.loader.exec_module(bundled_module)
-                evolution_hints = typing.get_type_hints(
-                    bundled_module.BeadEvolutionModel.from_material_profile
-                )
-            self.assertIn("profile", evolution_hints)
+            self.assertNotIn("deposition_manager", bundle)
+            self.assertFalse(legacy_manager_path.exists())
 
         self.assertIn("time_from_start_s", source)
         self.assertIn("interpolate_joint_target", source)
@@ -134,19 +116,40 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertEqual(source.count("robot.set_joint_positions("), 1)
         self.assertIn("INITIALIZATION_TIMEOUT_S = 30.0", source)
         self.assertIn("INITIALIZATION_TOLERANCE_RAD", source)
-        self.assertEqual(bundle["deposition_manager"].name, "deposition_manager.py")
-        self.assertIn("from deposition_manager import (", source)
-        self.assertIn("BeadEvolutionModel,", source)
-        self.assertIn("DepositionManager,", source)
-        self.assertIn("class FlowSchedule", deposition_manager_source)
-        self.assertIn("class BeadEvolutionModel", deposition_manager_source)
-        self.assertIn("visual_radius_scale", deposition_manager_source)
+        self.assertIn("def resolve_project_root(script_dir):", source)
+        self.assertIn('os.environ.get("RPP_PROJECT_ROOT", "")', source)
+        self.assertIn("while project_root_text in sys.path:", source)
+        self.assertIn("sys.path.insert(0, project_root_text)", source)
         self.assertIn(
-            "volume / (end - start)",
-            deposition_manager_source,
+            "from robotic_printing_platform.extrusion import deposition as deposition_module",
+            source,
         )
-        self.assertIn("extrusion_volume_mm3", deposition_manager_source)
-        self.assertIn("time_from_start_s", deposition_manager_source)
+        self.assertIn(
+            "actual_deposition_path = Path(deposition_module.__file__).resolve()",
+            source,
+        )
+        self.assertIn(
+            "actual_deposition_path != expected_deposition_path",
+            source,
+        )
+        self.assertNotIn("from deposition_manager import (", source)
+        project_resolution = source.index(
+            "PROJECT_ROOT = resolve_project_root(SCRIPT_DIR)"
+        )
+        central_import = source.index(
+            "from robotic_printing_platform.extrusion import deposition as deposition_module"
+        )
+        isaac_start = source.index("simulation_app = SimulationApp(")
+        self.assertLess(project_resolution, central_import)
+        self.assertLess(central_import, isaac_start)
+        self.assertIn(
+            "BeadEvolutionModel = deposition_module.BeadEvolutionModel",
+            source,
+        )
+        self.assertIn(
+            "DepositionManager = deposition_module.DepositionManager",
+            source,
+        )
         self.assertIn(
             "flow_schedule = FlowSchedule.from_trajectory_points(trajectory)",
             source,
@@ -242,6 +245,93 @@ class IsaacReplayExportTests(unittest.TestCase):
         self.assertIn('"unrepresented_volume_mm3"', source)
         self.assertIn('os.environ.get("RPP_TRAJECTORY_CSV"', source)
         self.assertNotIn(str(bundle["csv"].resolve()), source)
+
+        resolver_node = next(
+            node
+            for node in ast.parse(source).body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "resolve_project_root"
+        )
+        resolver_namespace = {"os": os, "Path": Path}
+        exec(
+            compile(
+                ast.Module(body=[resolver_node], type_ignores=[]),
+                "<generated-project-root-resolver>",
+                "exec",
+            ),
+            resolver_namespace,
+        )
+        resolve_project_root = resolver_namespace["resolve_project_root"]
+        with tempfile.TemporaryDirectory() as directory:
+            repository_root = Path(directory) / "cloned-repository"
+            package_root = repository_root / "robotic_printing_platform"
+            deposition_module = package_root / "extrusion" / "deposition.py"
+            deposition_module.parent.mkdir(parents=True)
+            (package_root / "__init__.py").write_text("", encoding="utf-8")
+            deposition_module.write_text("", encoding="utf-8")
+            nested_output = repository_root / "outputs" / "ur5e"
+            nested_output.mkdir(parents=True)
+
+            with mock.patch.dict(os.environ, {"RPP_PROJECT_ROOT": ""}):
+                self.assertEqual(
+                    resolve_project_root(nested_output),
+                    repository_root,
+                )
+                with self.assertRaisesRegex(RuntimeError, "Set RPP_PROJECT_ROOT"):
+                    resolve_project_root(Path(directory) / "external-output")
+            with mock.patch.dict(
+                os.environ,
+                {"RPP_PROJECT_ROOT": str(repository_root)},
+            ):
+                self.assertEqual(
+                    resolve_project_root(Path(directory) / "external-output"),
+                    repository_root.resolve(),
+                )
+            with mock.patch.dict(
+                os.environ,
+                {"RPP_PROJECT_ROOT": str(Path(directory) / "not-a-repository")},
+            ):
+                with self.assertRaisesRegex(RuntimeError, "RPP_PROJECT_ROOT"):
+                    resolve_project_root(nested_output)
+
+        bootstrap_source = source.split("from isaacsim import SimulationApp", 1)[0]
+        bootstrap_source += "\nprint(DepositionManager.__module__)\n"
+        repository_root = Path(__file__).resolve().parent
+
+        def run_isolated_bootstrap(script_path, environment):
+            return subprocess.run(
+                [sys.executable, "-I", "-B", str(script_path)],
+                cwd=script_path.parent,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        with tempfile.TemporaryDirectory(dir=repository_root) as directory:
+            script_path = Path(directory) / "outputs" / "ur5e" / "bootstrap.py"
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text(bootstrap_source, encoding="utf-8")
+            environment = os.environ.copy()
+            environment.pop("RPP_PROJECT_ROOT", None)
+            result = run_isolated_bootstrap(script_path, environment)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "robotic_printing_platform.extrusion.deposition",
+                result.stdout,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            script_path = Path(directory) / "bootstrap.py"
+            script_path.write_text(bootstrap_source, encoding="utf-8")
+            environment = os.environ.copy()
+            environment["RPP_PROJECT_ROOT"] = str(repository_root)
+            result = run_isolated_bootstrap(script_path, environment)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "robotic_printing_platform.extrusion.deposition",
+                result.stdout,
+            )
 
     def test_ur5e_replay_embeds_fixed_link_tcp_anchor_fallbacks(self):
         repo_root = Path(__file__).resolve().parent

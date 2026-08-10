@@ -17,7 +17,6 @@ robotic-printing-platform/
 |   |-- ur5/
 |   |   `-- replay_isaac.py
 |   `-- ur5e/
-|       |-- deposition_manager.py
 |       |-- replay_isaac.py
 |       |-- resolved_material_profile.json
 |       |-- robot_print_trajectory.csv
@@ -72,10 +71,10 @@ convention declared by the selected profile.
   stationary droplets through a simulator-independent sink interface; it also
   provides the constant-parameter bead spreading/shrinkage model.
 - `robotic_printing_platform/exporters/isaac.py` generates an Isaac Sim replay
-  bundle that loads the selected profile and sibling deposition manager at
-  runtime, resolves the TCP from the USD hierarchy, and selects a curve or PBD
-  particle sink. The curve sink updates unsettled widths and droplet radii on
-  every replay step.
+  bundle that loads the selected profile and imports the central deposition
+  module from the cloned repository at runtime, resolves the TCP from the USD
+  hierarchy, and selects a curve or PBD particle sink. The curve sink updates
+  unsettled widths and droplet radii on every replay step.
 - `outputs/ur5e/resolved_material_profile.json` identifies the exact profile
   used for the committed replay snapshot.
 

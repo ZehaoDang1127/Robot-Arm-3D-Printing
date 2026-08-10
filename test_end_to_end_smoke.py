@@ -60,6 +60,13 @@ class EndToEndSmokeTests(unittest.TestCase):
                     )
                     self.assertEqual(Path(isaac_script_path).parent.name, expected_output_name)
                     self.assertIn("MATERIAL_PROFILE = load_material_profile", isaac_source)
+                    self.assertIn(
+                        "from robotic_printing_platform.extrusion import deposition as deposition_module",
+                        isaac_source,
+                    )
+                    self.assertFalse(
+                        Path(isaac_script_path).with_name("deposition_manager.py").exists()
+                    )
                     self.assertNotIn(
                         "MATERIAL_PROFILE_ID = 'alginate_chitosan_pic_al1ch1_research'",
                         isaac_source,

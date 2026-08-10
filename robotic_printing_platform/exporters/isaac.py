@@ -139,22 +139,81 @@ Run inside Isaac Sim, for example:
     ./python.sh replay_isaac.py
 
 Set RPP_ROBOT_USD to override the robot asset path at launch time.
+Set RPP_PROJECT_ROOT if this script is not below the cloned repository root.
 """
 
 import csv
 import json
 import math
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from deposition_manager import (
-    BeadEvolutionModel,
-    DepositionManager,
-    FlowSchedule,
-    TcpPose,
-)
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def resolve_project_root(script_dir):
+    """Find the cloned repository that owns the central deposition module."""
+    def is_project_root(candidate):
+        return (
+            (candidate / "robotic_printing_platform" / "__init__.py").is_file()
+            and (
+                candidate
+                / "robotic_printing_platform"
+                / "extrusion"
+                / "deposition.py"
+            ).is_file()
+        )
+
+    override = os.environ.get("RPP_PROJECT_ROOT", "").strip()
+    if override:
+        candidate = Path(override).expanduser().resolve()
+        if is_project_root(candidate):
+            return candidate
+        raise RuntimeError(
+            f"RPP_PROJECT_ROOT is not a robotic-printing-platform repository: "
+            f"{{candidate}}"
+        )
+
+    candidates = (script_dir, *script_dir.parents)
+    for candidate in candidates:
+        if is_project_root(candidate):
+            return candidate
+    raise RuntimeError(
+        f"could not locate the robotic-printing-platform repository above "
+        f"{{script_dir}}; searched {{', '.join(str(path) for path in candidates)}}. "
+        f"Set RPP_PROJECT_ROOT to the cloned repository root."
+    )
+
+
+PROJECT_ROOT = resolve_project_root(SCRIPT_DIR)
+project_root_text = str(PROJECT_ROOT)
+while project_root_text in sys.path:
+    sys.path.remove(project_root_text)
+sys.path.insert(0, project_root_text)
+
+try:
+    from robotic_printing_platform.extrusion import deposition as deposition_module
+except ImportError as error:
+    raise RuntimeError(
+        f"failed to import the central deposition module from {{PROJECT_ROOT}}: "
+        f"{{error}}"
+    ) from error
+expected_deposition_path = (
+    PROJECT_ROOT / "robotic_printing_platform" / "extrusion" / "deposition.py"
+).resolve()
+actual_deposition_path = Path(deposition_module.__file__).resolve()
+if actual_deposition_path != expected_deposition_path:
+    raise RuntimeError(
+        f"resolved project root {{PROJECT_ROOT}}, but imported deposition module "
+        f"from {{actual_deposition_path}}"
+    )
+BeadEvolutionModel = deposition_module.BeadEvolutionModel
+DepositionManager = deposition_module.DepositionManager
+FlowSchedule = deposition_module.FlowSchedule
+TcpPose = deposition_module.TcpPose
 from isaacsim import SimulationApp
 
 simulation_app = SimulationApp({{"headless": False}})
@@ -172,7 +231,6 @@ except ImportError:  # Isaac Sim 4.x compatibility
 from omni.physx.scripts import particleUtils, physicsUtils
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade, Vt, PhysxSchema
 
-SCRIPT_DIR = Path(__file__).resolve().parent
 TRAJECTORY_CSV = Path(
     os.environ.get("RPP_TRAJECTORY_CSV", SCRIPT_DIR / {trajectory_filename!r})
 ).resolve()
@@ -1461,7 +1519,6 @@ def export_isaac_bundle(
     csv_path = out / f"{basename}_trajectory.csv"
     json_path = out / f"{basename}_trajectory.json"
     material_profile_path = out / "resolved_material_profile.json"
-    deposition_manager_path = out / "deposition_manager.py"
     script_path = out / "replay_isaac.py"
     robot_usd_relative = ""
     robot_usd_fallback = effective_robot_usd_path
@@ -1481,13 +1538,6 @@ def export_isaac_bundle(
         json.dumps(asdict(material), indent=2) + "\n",
         encoding="utf-8",
     )
-    deposition_manager_source = (
-        Path(__file__).resolve().parents[1] / "extrusion" / "deposition.py"
-    )
-    deposition_manager_path.write_text(
-        deposition_manager_source.read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
     script_path.write_text(
         ISAAC_SCRIPT.format(
             trajectory_filename=csv_path.name,
@@ -1503,10 +1553,12 @@ def export_isaac_bundle(
             bed_thickness_m=float(traj.config.bed_thickness_m),
         )
     )
+    legacy_manager_path = out / "deposition_manager.py"
+    if legacy_manager_path.is_file():
+        legacy_manager_path.unlink()
     return {
         "csv": csv_path,
         "json": json_path,
         "material_profile": material_profile_path,
-        "deposition_manager": deposition_manager_path,
         "isaac_script": script_path,
     }
