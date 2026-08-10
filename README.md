@@ -574,7 +574,9 @@ Robot-Arm-3D-Printing/
 │   ├── trajectory/                    # velocity/acceleration-aware retiming
 │   ├── validation/                    # quality, collision, and sweep reports
 │   └── exporters/                     # Isaac Sim bundle generation
-└── test_*.py                          # unit and end-to-end smoke tests
+└── tests/                             # automated unit and end-to-end smoke tests
+    ├── __init__.py
+    └── test_*.py
 ```
 
 ## Extending the platform
@@ -620,7 +622,7 @@ conversion from G-code extrusion to deposited volume.
 Run the complete test suite from the repository root:
 
 ```bash
-python -m unittest discover -v
+python -m unittest discover -s tests -t . -v
 ```
 
 The tests cover layered metadata and extrusion conservation, generic robot

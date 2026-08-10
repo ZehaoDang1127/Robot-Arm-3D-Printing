@@ -8,15 +8,19 @@ from pathlib import Path
 from run_pipeline import run
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 class EndToEndSmokeTests(unittest.TestCase):
     ROBOT_MODELS = ("franka_panda", "ur5")
 
     def test_real_gcode_smoke_exports_validated_trajectories_for_all_robots(self):
         with tempfile.TemporaryDirectory() as directory:
             _, _, trajectories, bundles, _ = run(
-                "strong_universal_wall_hook_vcd.gcode",
+                PROJECT_ROOT / "strong_universal_wall_hook_vcd.gcode",
                 lo=0,
                 hi=1,
+                config_path=PROJECT_ROOT / "planner_config.json",
                 robot="both",
                 max_seg_len_mm=20,
                 max_ik_waypoints=10,

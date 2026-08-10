@@ -40,7 +40,9 @@ robotic-printing-platform/
 |           |-- franka_panda/
 |           |-- ur5/
 |           `-- ur5e/
-`-- test_*.py
+`-- tests/
+    |-- __init__.py
+    `-- test_*.py
 ```
 
 ## Universal material workflow

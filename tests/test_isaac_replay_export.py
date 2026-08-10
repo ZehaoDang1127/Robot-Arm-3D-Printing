@@ -18,6 +18,10 @@ from robotic_printing_platform.extrusion import MaterialProfile
 from robotic_printing_platform.robots.franka_panda import IKConfig, IKReport, RobotTrajectory, TrajectoryPoint
 
 
+TESTS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = TESTS_DIR.parent
+
+
 TEST_MATERIAL = MaterialProfile(
     profile_id="test_material",
     name="test material",
@@ -32,9 +36,10 @@ TEST_MATERIAL = MaterialProfile(
 
 class IsaacReplayExportTests(unittest.TestCase):
     def test_ur5e_extruder_bundle_includes_mount_payload(self):
-        repo_root = Path(__file__).resolve().parent
-        assembly = repo_root / "UR5e_extruder.usd"
-        mount_payload = repo_root / "Mount_Extruder_Models" / "ur5_mount_extruder.usd"
+        assembly = PROJECT_ROOT / "UR5e_extruder.usd"
+        mount_payload = (
+            PROJECT_ROOT / "Mount_Extruder_Models" / "ur5_mount_extruder.usd"
+        )
 
         self.assertTrue(assembly.is_file(), "UR5e assembly USD is missing")
         self.assertTrue(
@@ -296,7 +301,6 @@ class IsaacReplayExportTests(unittest.TestCase):
 
         bootstrap_source = source.split("from isaacsim import SimulationApp", 1)[0]
         bootstrap_source += "\nprint(DepositionManager.__module__)\n"
-        repository_root = Path(__file__).resolve().parent
 
         def run_isolated_bootstrap(script_path, environment):
             return subprocess.run(
@@ -308,7 +312,7 @@ class IsaacReplayExportTests(unittest.TestCase):
                 check=False,
             )
 
-        with tempfile.TemporaryDirectory(dir=repository_root) as directory:
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as directory:
             script_path = Path(directory) / "outputs" / "ur5e" / "bootstrap.py"
             script_path.parent.mkdir(parents=True)
             script_path.write_text(bootstrap_source, encoding="utf-8")
@@ -325,7 +329,7 @@ class IsaacReplayExportTests(unittest.TestCase):
             script_path = Path(directory) / "bootstrap.py"
             script_path.write_text(bootstrap_source, encoding="utf-8")
             environment = os.environ.copy()
-            environment["RPP_PROJECT_ROOT"] = str(repository_root)
+            environment["RPP_PROJECT_ROOT"] = str(PROJECT_ROOT)
             result = run_isolated_bootstrap(script_path, environment)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(
@@ -334,11 +338,10 @@ class IsaacReplayExportTests(unittest.TestCase):
             )
 
     def test_ur5e_replay_embeds_fixed_link_tcp_anchor_fallbacks(self):
-        repo_root = Path(__file__).resolve().parent
         planner_config = load_planner_config(
-            repo_root / "planner_config.json",
+            PROJECT_ROOT / "planner_config.json",
             robot_config_dir=(
-                repo_root
+                PROJECT_ROOT
                 / "robotic_printing_platform"
                 / "robots"
                 / "robot_configs"

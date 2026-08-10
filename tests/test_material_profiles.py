@@ -12,6 +12,9 @@ from robotic_printing_platform.extrusion import (
 )
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 class MaterialProfileTests(unittest.TestCase):
     def test_filament_mode_uses_filament_cross_section(self):
         material = MaterialProfile(
@@ -53,8 +56,9 @@ class MaterialProfileTests(unittest.TestCase):
             )
 
     def test_default_planner_selects_research_hydrogel_profile(self):
-        repo_root = Path(__file__).resolve().parent
-        material_config = load_planner_config(repo_root / "planner_config.json").material
+        material_config = load_planner_config(
+            PROJECT_ROOT / "planner_config.json"
+        ).material
         profile = material_config.profile
 
         self.assertEqual(material_config.profile_id, profile.profile_id)
@@ -102,9 +106,8 @@ class MaterialProfileTests(unittest.TestCase):
                     )
 
     def test_cli_style_override_selects_pla_without_changing_planner_file(self):
-        repo_root = Path(__file__).resolve().parent
         profile = load_planner_config(
-            repo_root / "planner_config.json",
+            PROJECT_ROOT / "planner_config.json",
             material_profile_id="pla",
         ).material.profile
 
@@ -114,16 +117,14 @@ class MaterialProfileTests(unittest.TestCase):
         self.assertAlmostEqual(profile.filament_diameter_mm, 1.75)
 
     def test_unknown_profile_lists_available_profiles(self):
-        repo_root = Path(__file__).resolve().parent
         with self.assertRaisesRegex(ValueError, "available profiles"):
             load_planner_config(
-                repo_root / "planner_config.json",
+                PROJECT_ROOT / "planner_config.json",
                 material_profile_id="not_a_material",
             )
 
     def test_profile_id_must_match_filename(self):
-        repo_root = Path(__file__).resolve().parent
-        profile_path = repo_root / "material_profiles" / "pla.json"
+        profile_path = PROJECT_ROOT / "material_profiles" / "pla.json"
 
         profile = load_material_profile(profile_path)
 

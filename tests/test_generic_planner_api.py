@@ -16,6 +16,9 @@ from robotic_printing_platform.robots.generic import (
 from robotic_printing_platform.robots.ur5 import make_ur5_ik_config
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 class GenericPlannerApiTests(unittest.TestCase):
     ROBOT_CONFIG_FACTORIES = {
         "franka_panda": IKConfig,
@@ -37,9 +40,13 @@ class GenericPlannerApiTests(unittest.TestCase):
 
     def test_ur5e_package_uses_ur5e_geometry_and_tighter_ik_tolerance(self):
         config = load_planner_config(
-            "planner_config.json",
-            robot_config_dir=Path(
-                "robotic_printing_platform/robots/robot_configs/ur5e"
+            PROJECT_ROOT / "planner_config.json",
+            robot_config_dir=(
+                PROJECT_ROOT
+                / "robotic_printing_platform"
+                / "robots"
+                / "robot_configs"
+                / "ur5e"
             ),
         )
 
