@@ -309,46 +309,6 @@ DP optimizes its configured objective; it is not guaranteed to improve every
 reported metric or final print time. Compare success rate, joint motion, yaw
 discontinuities, residuals, singularity margin, warnings, and retimed duration.
 
-#### Run an apples-to-apples comparison
-
-Use identical preprocessing, robot, material, yaw count, tolerances, and
-waypoint coverage; write each mode to a different output root:
-
-```bash
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
-  --material alginate_chitosan_pic_al1ch1_research \
-  --robot ur5e --lo 0 --hi 1 \
-  --max-seg-len-mm 20 --simplify-deg 2 \
-  --max-ik-waypoints 100 \
-  --ik-selection-mode greedy \
-  --output-dir outputs/ik_compare/greedy
-
-python run_pipeline.py strong_universal_wall_hook_vcd.gcode \
-  --material alginate_chitosan_pic_al1ch1_research \
-  --robot ur5e --lo 0 --hi 1 \
-  --max-seg-len-mm 20 --simplify-deg 2 \
-  --max-ik-waypoints 100 \
-  --ik-selection-mode global_dp \
-  --output-dir outputs/ik_compare/global_dp
-```
-
-Then compare these fields in each
-`ur5e/trajectory_validation_report.json`:
-
-```text
-ik_success_rate
-yaw_discontinuity_count
-total_joint_motion_rad
-maximum_joint_step_rad
-position_error_m.{mean,p95,maximum}
-minimum_jacobian_singular_value
-collision_warnings
-estimated_print_time_s
-```
-
-The cap above keeps the experiment short and marks timing as preview-only.
-Remove it from both commands for a full-path comparison.
-
 ### 5. Trajectory retiming
 
 IK produces geometry, not executable timing. For every segment, retiming starts
