@@ -1,5 +1,0 @@
-robot,dof,waypoints,print_waypoints,travel_waypoints,deposition_runs,ik_success_rate,mean_position_error_mm,max_position_error_mm,p95_position_error_mm,total_joint_motion_rad,max_joint_velocity_rad_s,max_joint_acceleration_rad_s2,min_joint_limit_margin_rad,min_jacobian_singular_value,duration_s,extrusion_volume_mm3,velocity_violations,acceleration_violations,collision_warnings
-Franka Panda,7,446,416,30,16,1.0,3.503797597,7.922052877,7.154075195,1.071249352,0.275110555,2.751105548,0.517048918,0.222715441,40.300030000,64.0,0,0,0
-UR5,6,446,416,30,16,1.0,3.477313765,7.898228542,7.038842059,1.026874686,0.230801906,4.007850673,4.127850546,0.251436022,40.300030000,64.0,0,0,0
-UR5e,6,446,416,30,16,1.0,0.848798703,1.979790000,1.938560000,1.411930000,0.159987000,10.000000000,0.947520000,0.245332000,40.347600000,64.0,0,0,0
-
